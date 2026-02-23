@@ -109,6 +109,11 @@ target_link_libraries(parallel_rdkit_core PRIVATE
     RDKitSmilesParse
     RDKitInchi
     RDKitRDInchiLib
+    RDKitMolStandardize
+    RDKitFileParsers
+    RDKitSubstructMatch
+    RDKitFingerprints
+    RDKitDepictor
     ${Boost_LIBRARIES}
     OpenMP::OpenMP_CXX
 )
