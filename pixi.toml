@@ -12,7 +12,7 @@ authors = ["Nir Cohen"]
 backend = { name = "pixi-build-rattler-build", version = "*"}
 [tasks]
 test = "pytest tests"
-# build = "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j4"
+build_native = "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)"
 [dependencies]
 parallel_rdkit = {path = '.'}
 python = "3.12.*"
@@ -22,3 +22,8 @@ pytest = "*"
 numpy = "*"
 tqdm = "*"
 rdkit = "*"
+librdkit-dev = "*"
+nanobind = "*"
+boost = "*"
+cmake = "*"
+ninja = "*"

@@ -8,6 +8,11 @@ from .parallel_rdkit_backend import (
     smiles_to_inchikey_parallel as _smiles_to_inchikey_parallel,
     msready_inchi_inchikey_parallel as _msready_inchi_inchikey_parallel,
 )
+from .fingerprint import (
+    FingerprintParams,
+    get_fp_list,
+    get_fp_polars,
+)
 
 __all__ = [
     "msready_smiles",
@@ -17,6 +22,9 @@ __all__ = [
     "smiles_to_inchi_parallel",
     "smiles_to_inchikey_parallel",
     "msready_inchi_inchikey_parallel",
+    "FingerprintParams",
+    "get_fp_list",
+    "get_fp_polars",
 ]
 
 def msready_smiles(smiles: str) -> str:

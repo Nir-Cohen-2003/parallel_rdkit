@@ -9,6 +9,15 @@
 #include <RDGeneral/RDLog.h>
 #include <RDGeneral/Invariant.h>
 
+#include <GraphMol/Fingerprints/FingerprintGenerator.h>
+#include <GraphMol/Fingerprints/MorganGenerator.h>
+#include <GraphMol/Fingerprints/RDKitFPGenerator.h>
+#include <GraphMol/Fingerprints/AtomPairGenerator.h>
+#include <GraphMol/Fingerprints/TopologicalTorsionGenerator.h>
+#include <GraphMol/Fingerprints/MACCS.h>
+#include <DataStructs/BitVects.h>
+#include <DataStructs/SparseIntVect.h>
+
 #include <omp.h>
 #include <memory>
 #include <tuple>
@@ -129,6 +138,72 @@ std::vector<std::tuple<std::string, std::string, std::string>> msready_inchi_inc
         
         return {msready, inchi, inchikey};
     });
+}
+
+std::vector<float> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts) {
+    size_t n = smiles.size();
+    size_t fpSize = opts.fpSize;
+    std::vector<float> results(n * fpSize, 0.0f);
+
+    #pragma omp parallel
+    {
+        std::unique_ptr<FingerprintGenerator<std::uint64_t>> fpgen;
+        if (opts.fp_type == "morgan") {
+            fpgen.reset(MorganFingerprint::getMorganGenerator<std::uint64_t>(opts.radius, opts.countSimulation, opts.includeChirality, opts.useBondTypes, false, nullptr, nullptr, fpSize));
+        } else if (opts.fp_type == "rdkit") {
+            fpgen.reset(RDKitFP::getRDKitFPGenerator<std::uint64_t>(opts.minPath, opts.maxPath, true, true, true, nullptr, opts.countSimulation, {1, 2, 4, 8}, fpSize, opts.numBitsPerFeature));
+        } else if (opts.fp_type == "atompair") {
+            fpgen.reset(AtomPair::getAtomPairGenerator<std::uint64_t>(opts.minDistance, opts.maxDistance, opts.includeChirality, opts.use2D, nullptr, opts.countSimulation, fpSize));
+        } else if (opts.fp_type == "torsion") {
+            fpgen.reset(TopologicalTorsion::getTopologicalTorsionGenerator<std::uint64_t>(opts.includeChirality, opts.targetSize, nullptr, opts.countSimulation, fpSize));
+        }
+
+        #pragma omp for schedule(static, 500)
+        for (size_t i = 0; i < n; ++i) {
+            std::unique_ptr<ROMol> mol(SmilesToMol(smiles[i]));
+            if (!mol) continue;
+
+            if (opts.fp_type == "maccs") {
+                std::unique_ptr<ExplicitBitVect> fp(RDKit::MACCSFingerprints::getFingerprintAsBitVect(*mol));
+                if (fp) {
+                    for (unsigned int j = 0; j < fp->getNumBits() && j < fpSize; ++j) {
+                        if (fp->getBit(j)) results[i * fpSize + j] = 1.0f;
+                    }
+                }
+            } else if (fpgen) {
+                if (opts.fp_method == "GetFingerprint") {
+                    std::unique_ptr<ExplicitBitVect> fp(fpgen->getFingerprint(*mol));
+                    if (fp) {
+                        for (unsigned int j = 0; j < fp->getNumBits() && j < fpSize; ++j) {
+                            if (fp->getBit(j)) results[i * fpSize + j] = 1.0f;
+                        }
+                    }
+                } else if (opts.fp_method == "GetCountFingerprint") {
+                    std::unique_ptr<SparseIntVect<std::uint32_t>> fp(fpgen->getCountFingerprint(*mol));
+                    if (fp) {
+                        for (const auto& it : fp->getNonzeroElements()) {
+                            results[i * fpSize + (it.first % fpSize)] += it.second;
+                        }
+                    }
+                } else if (opts.fp_method == "GetSparseFingerprint") {
+                    std::unique_ptr<SparseBitVect> fp(fpgen->getSparseFingerprint(*mol));
+                    if (fp) {
+                        for (int bit : *fp->getBitSet()) {
+                            results[i * fpSize + (static_cast<size_t>(bit) % fpSize)] = 1.0f;
+                        }
+                    }
+                } else if (opts.fp_method == "GetSparseCountFingerprint") {
+                    std::unique_ptr<SparseIntVect<std::uint64_t>> fp(fpgen->getSparseCountFingerprint(*mol));
+                    if (fp) {
+                        for (const auto& it : fp->getNonzeroElements()) {
+                            results[i * fpSize + (it.first % fpSize)] += it.second;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return results;
 }
 
 } // namespace parallel_rdkit
