@@ -25,14 +25,14 @@ requirements:
     - cmake
     - ninja
   host:
-    - python >=3.8,<3.13
+    - python >=3.8
     - pip
     - librdkit-dev
     - nanobind >=2.0
     - boost
     - scikit-build-core
   run:
-    - python >=3.8,<3.13
+    - python >=3.8
     - rdkit
     - boost
     - polars
