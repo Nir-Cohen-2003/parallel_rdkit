@@ -1,0 +1,24 @@
+[workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+preview = ["pixi-build"]
+[package]
+name = "parallel_rdkit"
+version = "0.1.0"
+license = "Apache-2.0"
+license-file = "LICENSE"
+authors = ["Nir Cohen"]
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*"}
+[tasks]
+test = "pytest tests"
+# build = "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j4"
+[dependencies]
+parallel_rdkit = {path = '.'}
+python = "3.12.*"
+polars = "*"
+pyarrow = "*"
+pytest = "*"
+numpy = "*"
+tqdm = "*"
+rdkit = "*"
