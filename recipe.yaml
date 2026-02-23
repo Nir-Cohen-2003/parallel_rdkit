@@ -17,6 +17,9 @@ build:
     version_independent: true
 
 requirements:
+  ignore_run_exports:
+    by_name:
+      - python_abi
   build:
     - ${{ compiler('cxx') }}
     - cmake

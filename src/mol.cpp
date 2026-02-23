@@ -39,7 +39,7 @@ std::string msready_smiles(const std::string& smiles) {
         std::unique_ptr<ROMol> ms_ready_mol(te.canonicalize(*charge_parent));
 
         // 5. Final SMILES generation (isomeric=false, canonical=true)
-        return MolToSmiles(*ms_ready_mol, {false, true});
+        return MolToSmiles(*ms_ready_mol, false, false);
     } catch (...) {
         return "";
     }
@@ -72,7 +72,7 @@ std::vector<std::string> msready_smiles_parallel(const std::vector<std::string>&
 std::vector<std::string> sanitize_smiles_parallel(const std::vector<std::string>& smiles) {
     return process_parallel(smiles, [](const std::string& s) {
         std::unique_ptr<ROMol> mol(SmilesToMol(s));
-        return mol ? MolToSmiles(*mol, {false, true}) : std::string("");
+        return mol ? MolToSmiles(*mol, false, false) : std::string("");
     });
 }
 
@@ -80,7 +80,7 @@ std::vector<std::string> inchi_to_smiles_parallel(const std::vector<std::string>
     return process_parallel(inchis, [](const std::string& inchi) {
         ExtraInchiReturnValues rv;
         std::unique_ptr<ROMol> mol(InchiToMol(inchi, rv));
-        return mol ? MolToSmiles(*mol, {false, true}) : std::string("");
+        return mol ? MolToSmiles(*mol, false, false) : std::string("");
     });
 }
 
@@ -124,7 +124,7 @@ std::vector<std::tuple<std::string, std::string, std::string>> msready_inchi_inc
             te.setRemoveBondStereo(true);
             te.setRemoveSp3Stereo(true);
             std::unique_ptr<ROMol> ms_ready_mol(te.canonicalize(*charge_parent));
-            msready = MolToSmiles(*ms_ready_mol, {false, true});
+            msready = MolToSmiles(*ms_ready_mol, false, false);
         } catch (...) {}
         
         return {msready, inchi, inchikey};

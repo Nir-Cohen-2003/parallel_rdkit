@@ -54,7 +54,7 @@ def msready_smiles(smiles: str) -> str:
 
     # 6. Final SMILES generation
     # isomericSmiles=True ensures stereochemistry is preserved if it survived the process
-    return Chem.MolToSmiles(ms_ready_mol, isomericSmiles=false, canonical=True)
+    return Chem.MolToSmiles(ms_ready_mol, isomericSmiles=False, canonical=True)
 
 
 def sanitize_smiles_polars(smiles: pl.Series, batch_size: int = 10000) -> pl.Series:
