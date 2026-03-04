@@ -1,125 +1,118 @@
 name: Build and Publish
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  release:
-    types: [created]
-  workflow_dispatch:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    release:
+        types: [created]
+    workflow_dispatch:
 
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    build:
+        name: Build on ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            matrix:
+                os: [ubuntu-latest, windows-latest]
 
-    steps:
-      - uses: actions/checkout@v4
+        steps:
+            - uses: actions/checkout@v4
 
-      - name: Install rattler-build (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          curl -fsSL https://github.com/prefix-dev/rattler-build/releases/latest/download/rattler-build-x86_64-unknown-linux-musl -o rattler-build
-          chmod +x rattler-build
-          sudo mv rattler-build /usr/local/bin/
+            - name: Install rattler-build (Linux)
+              if: runner.os == 'Linux'
+              run: |
+                  pixi global install rattler-build
 
-      - name: Install rattler-build (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri https://github.com/prefix-dev/rattler-build/releases/latest/download/rattler-build-x86_64-pc-windows-msvc.zip -OutFile rattler-build.zip
-          Expand-Archive -Path rattler-build.zip -DestinationPath rattler-build-dist
-          $dest = "$env:USERPROFILE\rattler-build"
-          New-Item -ItemType Directory -Force -Path $dest
-          Move-Item -Path rattler-build-dist\rattler-build.exe -Destination $dest\rattler-build.exe
-          Add-Content -Path $env:GITHUB_PATH -Value $dest
+            - name: Install rattler-build (Windows)
+              if: runner.os == 'Windows'
+              shell: pwsh
+              run: |
+                  pixi global install rattler-build
 
-      - name: Show rattler-build version
-        run: rattler-build --version
+            - name: Show rattler-build version
+              run: rattler-build --version
 
-      - name: Build conda packages
-        run: rattler-build build --recipe recipe.yaml --output-dir dist/conda
-        shell: bash
+            - name: Build conda packages
+              run: rattler-build build --recipe recipe.yaml --output-dir dist/conda
+              shell: bash
 
-      - name: Upload conda artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: conda-dist-${{ matrix.os }}
-          path: dist/conda/**/*.conda
+            - name: Upload conda artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: conda-dist-${{ matrix.os }}
+                  path: dist/conda/**/*.conda
 
-      - name: Install microamba/rattler for wheel building
-        uses: mamba-org/setup-micromamba@v1
-        with:
-          environment-file: recipe.yaml
-          create-args: >-
-            python=3.12
-            pip
-            scikit-build-core
-            nanobind
-            cmake
-            ninja
-            librdkit-dev
-            boost
+            - name: Install microamba/rattler for wheel building
+              uses: mamba-org/setup-micromamba@v1
+              with:
+                  environment-file: recipe.yaml
+                  create-args: >-
+                      python=3.12
+                      pip
+                      scikit-build-core
+                      nanobind
+                      cmake
+                      ninja
+                      librdkit-dev
+                      boost
 
-      - name: Build wheels
-        run: |
-          python -m pip install build
-          python -m build --wheel --outdir dist/wheels
-        shell: bash
+            - name: Build wheels
+              run: |
+                  python -m pip install build
+                  python -m build --wheel --outdir dist/wheels
+              shell: bash
 
-      - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-${{ matrix.os }}
-          path: dist/wheels/*.whl
+            - name: Upload wheel artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: dist-${{ matrix.os }}
+                  path: dist/wheels/*.whl
 
-  publish:
-    name: Publish
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'release' && github.event.action == 'created'
+    publish:
+        name: Publish
+        needs: build
+        runs-on: ubuntu-latest
+        if: github.event_name == 'release' && github.event.action == 'created'
 
-    steps:
-      - name: Download all wheel artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          pattern: dist-*
-          merge-multiple: true
+        steps:
+            - name: Download all wheel artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: dist
+                  pattern: dist-*
+                  merge-multiple: true
 
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+            - name: Publish to TestPyPI
+              uses: pypa/gh-action-pypi-publish@release/v1
+              with:
+                  repository-url: https://test.pypi.org/legacy/
+                  password: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+            - name: Publish to PyPI
+              uses: pypa/gh-action-pypi-publish@release/v1
+              with:
+                  password: ${{ secrets.PYPI_API_TOKEN }}
 
-      - name: Download all conda artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: conda-dist
-          pattern: conda-dist-*
-          merge-multiple: true
+            - name: Download all conda artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: conda-dist
+                  pattern: conda-dist-*
+                  merge-multiple: true
 
-      - name: Install rattler-build (for publishing)
-        if: runner.os == 'Linux'
-        run: |
-          curl -fsSL https://github.com/prefix-dev/rattler-build/releases/latest/download/rattler-build-x86_64-unknown-linux-musl -o rattler-build
-          chmod +x rattler-build
-          sudo mv rattler-build /usr/local/bin/
+            - name: Install rattler-build (for publishing)
+              if: runner.os == 'Linux'
+              run: |
+                  curl -fsSL https://github.com/prefix-dev/rattler-build/releases/latest/download/rattler-build-x86_64-unknown-linux-musl -o rattler-build
+                  chmod +x rattler-build
+                  sudo mv rattler-build /usr/local/bin/
 
-      - name: Publish to prefix.dev and Anaconda.org
-        run: |
-          for package in conda-dist/**/*.conda; do
-            rattler-build upload prefix --api-key "${{ secrets.PREFIX_API_KEY }}" "$package"
-            anaconda upload --api-key "${{ secrets.ANACONDA_API_KEY }}" "$package"
-          done
-        shell: bash
+            - name: Publish to prefix.dev and Anaconda.org
+              run: |
+                  for package in conda-dist/**/*.conda; do
+                    rattler-build upload prefix --api-key "${{ secrets.PREFIX_API_KEY }}" "$package"
+                    anaconda upload --api-key "${{ secrets.ANACONDA_API_KEY }}" "$package"
+                  done
+              shell: bash
