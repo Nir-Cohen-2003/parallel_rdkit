@@ -30,4 +30,5 @@ rdkit = "*"
 
 [dependencies]
 python = "3.12.*"
+rattler-build = "*"
 parallel_rdkit = { path = "." }
