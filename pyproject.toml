@@ -19,6 +19,7 @@ dependencies = [
 
 [tool.scikit-build]
 wheel.py-api = "cp38"
+wheel.packages = ["src/parallel_rdkit"]
 cmake.args = [
     "-DPython_FIND_STRATEGY=LOCATION",
     "-DPython_FIND_REGISTRY=NEVER",
