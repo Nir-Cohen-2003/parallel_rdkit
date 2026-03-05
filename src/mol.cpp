@@ -110,10 +110,21 @@ std::vector<std::string> smiles_to_inchikey_parallel(const std::vector<std::stri
     });
 }
 
-std::vector<std::tuple<std::string, std::string, std::string>> msready_inchi_inchikey_parallel(const std::vector<std::string>& smiles) {
-    return process_parallel(smiles, [](const std::string& s) -> std::tuple<std::string, std::string, std::string> {
-        std::unique_ptr<RWMol> mol(SmilesToMol(s));
-        if (!mol) return {"", "", ""};
+std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::string>> msready_inchi_inchikey_parallel(const std::vector<std::string>& smiles) {
+    size_t n = smiles.size();
+    std::vector<std::string> msready_vec(n);
+    std::vector<std::string> inchi_vec(n);
+    std::vector<std::string> inchikey_vec(n);
+
+    #pragma omp parallel for schedule(static, 500)
+    for (size_t i = 0; i < n; ++i) {
+        std::unique_ptr<RWMol> mol(SmilesToMol(smiles[i]));
+        if (!mol) {
+            msready_vec[i] = "";
+            inchi_vec[i] = "";
+            inchikey_vec[i] = "";
+            continue;
+        }
         
         std::string inchi = "";
         std::string inchikey = "";
@@ -136,8 +147,12 @@ std::vector<std::tuple<std::string, std::string, std::string>> msready_inchi_inc
             msready = MolToSmiles(*ms_ready_mol, false, false);
         } catch (...) {}
         
-        return {msready, inchi, inchikey};
-    });
+        msready_vec[i] = msready;
+        inchi_vec[i] = inchi;
+        inchikey_vec[i] = inchikey;
+    }
+    
+    return {msready_vec, inchi_vec, inchikey_vec};
 }
 
 std::vector<float> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts) {

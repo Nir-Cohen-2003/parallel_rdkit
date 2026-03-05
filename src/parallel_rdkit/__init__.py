@@ -61,10 +61,10 @@ def smiles_to_inchikey_parallel(smiles: Iterable[str]) -> List[str]:
         smiles = list(smiles)
     return _smiles_to_inchikey_parallel(smiles)
 
-def msready_inchi_inchikey_parallel(smiles: Iterable[str]) -> List[Tuple[str, str, str]]:
+def msready_inchi_inchikey_parallel(smiles: Iterable[str]) -> Tuple[List[str], List[str], List[str]]:
     """
     Parallel conversion to MS-Ready SMILES, InChI, and InChIKey simultaneously.
-    Returns a list of tuples: (MS-Ready SMILES, InChI, InChIKey)
+    Returns a tuple of lists: (list of MS-Ready SMILES, list of InChIs, list of InChIKeys)
     """
     if not isinstance(smiles, list):
         smiles = list(smiles)

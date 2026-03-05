@@ -28,9 +28,8 @@ jobs:
             - name: Install rattler-build
               run: pixi global install rattler-build
 
-            - name: Build wheels inside rattler-build environment
-              run: |
-                  rattler-build shell -r recipe.yaml -- bash -c "python -m pip install build && python -m build --wheel --outdir dist/wheels"
+            - name: Build conda packages (which also builds wheels)
+              run: rattler-build build --recipe recipe.yaml --output-dir dist/conda
               shell: bash
 
             - name: Upload wheel artifacts
@@ -38,10 +37,6 @@ jobs:
               with:
                   name: dist-${{ matrix.os }}
                   path: dist/wheels/*.whl
-
-            - name: Build conda packages
-              run: rattler-build build --recipe recipe.yaml --output-dir dist/conda
-              shell: bash
 
             - name: Upload conda artifacts
               uses: actions/upload-artifact@v4

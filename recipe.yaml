@@ -1,52 +1,58 @@
 context:
-  name: "parallel_rdkit"
-  version: "0.1.0"
+    name: "parallel_rdkit"
+    version: "0.1.0"
 
 package:
-  name: "${{ name|lower }}"
-  version: "${{ version }}"
+    name: "${{ name|lower }}"
+    version: "${{ version }}"
 
 source:
-  path: .
+    path: .
 
 build:
-  number: 0
-  script: |
-    python -m pip install . --no-deps --no-build-isolation -vv
-  python:
-    version_independent: true
+    number: 0
+    script: |
+        python -m build --wheel --outdir "$SRC_DIR/dist/wheels" --no-isolation --skip-dependency-check
+        mkdir -p "$RECIPE_DIR/dist"
+        cp "$SRC_DIR/dist/wheels/"*.whl "$RECIPE_DIR/dist/"
+        python -m pip install "$SRC_DIR/dist/wheels/"*.whl --no-deps --no-build-isolation -vv
+    python:
+        version_independent: true
 
 requirements:
-  ignore_run_exports:
-    by_name:
-      - python_abi
-  build:
-    - ${{ compiler('cxx') }}
-    - cmake
-    - ninja
-  host:
-    - python >=3.8
-    - pip
-    - librdkit-dev
-    - nanobind >=2.0
-    - boost
-    - scikit-build-core
-  run:
-    - python >=3.8
-    - rdkit
-    - boost
-    - polars
-    - pyarrow
-    - pytest
-    - tqdm
-    - numpy
-    - pandas
+    ignore_run_exports:
+        by_name:
+            - python_abi
+    build:
+        - ${{ compiler('cxx') }}
+        - cmake
+        - ninja
+    host:
+        - python >=3.8
+        - pip
+        - python-build
+        - librdkit-dev
+        - nanobind >=2.0
+        - boost
+        - scikit-build-core
+        - cmake
+        - ninja
+    run:
+        - python >=3.8
+        - rdkit
+        - boost
+        - polars
+        - pyarrow
+        - pytest
+        - tqdm
+        - numpy
+        - pandas
 
 tests:
-  - python:
-      imports:
-        - parallel_rdkit
+    - python:
+          imports:
+              - parallel_rdkit
 
 about:
-  summary: "A parallel RDKit utilities implementation"
-  license: Apache-2.0
+    summary: "A parallel RDKit utilities implementation"
+    license: Apache-2.0

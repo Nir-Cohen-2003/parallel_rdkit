@@ -41,17 +41,21 @@ def test_msready_complex():
 
 def test_parallel_multi():
     smiles = ["C", "CC", "CC(=O)[O-].[Na+]", "CN.Cl", "[O-]c1ccccc1"]
-    results = msready_inchi_inchikey_parallel(smiles)
+    msready, inchis, inchikeys = msready_inchi_inchikey_parallel(smiles)
     
-    assert len(results) == 5
+    assert len(msready) == 5
+    assert len(inchis) == 5
+    assert len(inchikeys) == 5
+    
     # Check MS-Ready SMILES
-    assert results[0][0] == "C"
-    assert results[1][0] == "CC"
-    assert results[2][0] == "CC(=O)O"
-    assert results[3][0] == "CN"
-    assert results[4][0] == "Oc1ccccc1"
+    assert msready[0] == "C"
+    assert msready[1] == "CC"
+    assert msready[2] == "CC(=O)O"
+    assert msready[3] == "CN"
+    assert msready[4] == "Oc1ccccc1"
     
     # Check that InChI and InChIKey are present (non-empty)
-    for res in results:
-        assert res[1].startswith("InChI=")
-        assert len(res[2]) == 27 # Standard InChIKey length
+    for inchi in inchis:
+        assert inchi.startswith("InChI=")
+    for inchikey in inchikeys:
+        assert len(inchikey) == 27 # Standard InChIKey length
