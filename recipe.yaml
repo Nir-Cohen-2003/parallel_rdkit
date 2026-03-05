@@ -11,11 +11,6 @@ source:
 
 build:
     number: 0
-    script:
-        - if: win
-          then: $RECIPE_DIR/build.bat
-        - if: unix
-          then: $RECIPE_DIR/build.sh
     python:
         version_independent: true
 
