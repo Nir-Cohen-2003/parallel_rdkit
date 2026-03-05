@@ -1,6 +1,9 @@
-from typing import List, Optional, Iterable
+from typing import Iterable, List, Optional
+
 import numpy as np
+
 from .parallel_rdkit_backend import FingerprintOptions, get_fingerprints_parallel
+
 
 class FingerprintParams:
     def __init__(
@@ -18,23 +21,23 @@ class FingerprintParams:
         maxDistance: Optional[int] = None,
         countSimulation: Optional[bool] = None,
         includeChirality: bool = False,
-        targetSize: int = 4
+        targetSize: int = 4,
     ):
         self.fp_type = fp_type
         self.fp_method = fp_method
         self.fpSize = fpSize
-        
+
         # Match RDKit defaults
         if radius is None:
             self.radius = 3 if fp_type == "morgan" else 2
         else:
             self.radius = radius
-            
+
         if maxDistance is None:
-            self.maxDistance = 30 # RDKit default for AtomPair/Torsion is 30
+            self.maxDistance = 30  # RDKit default for AtomPair/Torsion is 30
         else:
             self.maxDistance = maxDistance
-            
+
         if countSimulation is None:
             if fp_type in ["atompair", "torsion"]:
                 self.countSimulation = True
@@ -70,31 +73,24 @@ class FingerprintParams:
         opts.targetSize = self.targetSize
         return opts
 
+
 def get_fp_list(smiles: Iterable[str], params: FingerprintParams) -> List[np.ndarray]:
     """
     Get a list of fingerprints for a list of SMILES strings.
     """
     if not isinstance(smiles, list):
         smiles = list(smiles)
-    
+
     # C++ returns a flattened float vector
     flattened = get_fingerprints_parallel(smiles, params.to_backend_opts())
-    
+
     n = len(smiles)
     stride = params.fpSize
-    
+
     # Reshape and convert to numpy arrays
     arr = np.array(flattened, dtype=np.float32).reshape(n, stride)
-    
+
     if params.fp_type == "maccs":
         arr = arr[:, :167]
-        
-    return [arr[i] for i in range(n)]
 
-def get_fp_polars(smiles: Iterable[str], params: FingerprintParams):
-    """
-    Get fingerprints as a polars DataFrame.
-    """
-    import polars as pl
-    fps = get_fp_list(smiles, params)
-    return pl.DataFrame(fps)
+    return [arr[i] for i in range(n)]

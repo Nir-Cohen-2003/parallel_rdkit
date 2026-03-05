@@ -1,6 +1,6 @@
 context:
     name: "parallel_rdkit"
-    version: "0.1.0"
+    version: "0.2.0"
 
 package:
     name: "${{ name|lower }}"
@@ -27,6 +27,7 @@ requirements:
         - ${{ compiler('cxx') }}
         - cmake
         - ninja
+        - nanobind
     host:
         - python >=3.8
         - pip
@@ -40,13 +41,7 @@ requirements:
     run:
         - python >=3.8
         - rdkit
-        - boost
-        - polars
-        - pyarrow
-        - pytest
-        - tqdm
         - numpy
-        - pandas
 
 tests:
     - python:
