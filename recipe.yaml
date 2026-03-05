@@ -25,15 +25,21 @@ requirements:
             - python_abi
     build:
         - ${{ compiler('cxx') }}
+        - python >=3.8
+        - pip
+        - python-build
+        - librdkit-dev
+        - nanobind
+        - boost
+        - scikit-build-core
         - cmake
         - ninja
-        - nanobind
     host:
         - python >=3.8
         - pip
         - python-build
         - librdkit-dev
-        - nanobind >=2.0
+        - nanobind
         - boost
         - scikit-build-core
         - cmake
