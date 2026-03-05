@@ -33,6 +33,11 @@ jobs:
                   pixi build
               shell: bash
 
+            - name: Run tests
+              run: |
+                  pixi run -e test test
+              shell: bash
+
             - name: Upload wheel artifacts
               uses: actions/upload-artifact@v4
               with:

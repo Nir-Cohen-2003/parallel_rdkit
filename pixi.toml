@@ -26,6 +26,7 @@ polars = "*"
 pyarrow = "*"
 tqdm = "*"
 rdkit = "*"
+parallel_rdkit = { path = "." }
 
 [dependencies]
 python = "3.12.*"
