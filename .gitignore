@@ -4,3 +4,5 @@
 **.conda
 pixi.lock
 **/__pycache__/**
+build/
+dist/
