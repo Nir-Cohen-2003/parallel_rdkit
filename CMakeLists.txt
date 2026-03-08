@@ -104,7 +104,7 @@ target_include_directories(parallel_rdkit_core PRIVATE
 
 target_link_directories(parallel_rdkit_core PRIVATE ${RDKIT_LIB_DIR})
 
-target_link_libraries(parallel_rdkit_core PRIVATE
+set(RDKIT_LIBS
     RDKitGraphMol
     RDKitSmilesParse
     RDKitInchi
@@ -114,6 +114,10 @@ target_link_libraries(parallel_rdkit_core PRIVATE
     RDKitSubstructMatch
     RDKitFingerprints
     RDKitDepictor
+)
+
+target_link_libraries(parallel_rdkit_core PRIVATE
+    ${RDKIT_LIBS}
     ${Boost_LIBRARIES}
     OpenMP::OpenMP_CXX
 )
@@ -128,7 +132,7 @@ install(TARGETS parallel_rdkit_core
 install(FILES src/mol.hpp DESTINATION include/parallel_rdkit)
 nanobind_add_module(parallel_rdkit_backend STABLE_ABI src/binding.cpp)
 target_link_directories(parallel_rdkit_backend PRIVATE ${RDKIT_LIB_DIR})
-target_link_libraries(parallel_rdkit_backend PRIVATE parallel_rdkit_core OpenMP::OpenMP_CXX)
+target_link_libraries(parallel_rdkit_backend PRIVATE parallel_rdkit_core ${RDKIT_LIBS} OpenMP::OpenMP_CXX)
 
 # also ensure module target gets same defs if needed
 if(PARALLEL_RDKIT_PROFILE)
