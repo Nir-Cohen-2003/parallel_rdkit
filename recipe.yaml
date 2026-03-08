@@ -43,6 +43,7 @@ requirements:
         - python >=3.8
         - rdkit
         - numpy
+        - boost
 
 tests:
     - python:

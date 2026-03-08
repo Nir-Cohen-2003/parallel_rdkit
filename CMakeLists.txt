@@ -149,6 +149,28 @@ target_include_directories(parallel_rdkit_backend PRIVATE
     # ${Eigen3_INCLUDE_DIRS}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
+# Set RPATH for the Python extension.
+# In a Conda/Pixi environment, the layout is:
+# site-packages/parallel_rdkit/parallel_rdkit_backend.abi3.so
+# The RDKit libraries are in:
+# lib/libRDKitGraphMol.so.1
+# So we need to go up 3 levels from the .so to reach the prefix root, then into lib.
+# $ORIGIN (parallel_rdkit/) -> .. (site-packages/) -> .. (prefix/) -> lib/
+# Thus $ORIGIN/../../lib or $ORIGIN/../../.. should work depending on how it's resolved.
+# Standard Conda RPATH is often $ORIGIN/../../../lib or just $ORIGIN/../.. if it's in a subdirectory of prefix.
+if(APPLE)
+    set(CMAKE_MACOSX_RPATH ON)
+    set(_rpath "@loader_path/../../../")
+else()
+    set(_rpath "$ORIGIN/../../..")
+endif()
+
+set_target_properties(parallel_rdkit_backend PROPERTIES
+    SKIP_BUILD_RPATH FALSE
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "${_rpath}"
+)
+
 install(
     TARGETS parallel_rdkit_backend
     EXPORT parallel_rdkitTargets
