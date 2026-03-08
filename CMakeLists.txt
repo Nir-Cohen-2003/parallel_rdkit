@@ -49,10 +49,18 @@ message(STATUS "Detected prefix: ${_detected_prefix}")
 
 # Set RDKit paths if not already set by cmake define
 if(NOT RDKIT_INCLUDE_DIR)
-  set(RDKIT_INCLUDE_DIR "${_detected_prefix}/include/rdkit" CACHE PATH "RDKit include dir")
+  if(WIN32)
+    set(RDKIT_INCLUDE_DIR "${_detected_prefix}/Library/include/rdkit" CACHE PATH "RDKit include dir")
+  else()
+    set(RDKIT_INCLUDE_DIR "${_detected_prefix}/include/rdkit" CACHE PATH "RDKit include dir")
+  endif()
 endif()
 if(NOT RDKIT_LIB_DIR)
-  set(RDKIT_LIB_DIR "${_detected_prefix}/lib" CACHE PATH "RDKit lib dir")
+  if(WIN32)
+    set(RDKIT_LIB_DIR "${_detected_prefix}/Library/lib" CACHE PATH "RDKit lib dir")
+  else()
+    set(RDKIT_LIB_DIR "${_detected_prefix}/lib" CACHE PATH "RDKit lib dir")
+  endif()
 endif()
 message(STATUS "RDKIT_INCLUDE_DIR = ${RDKIT_INCLUDE_DIR}")
 message(STATUS "RDKIT_LIB_DIR = ${RDKIT_LIB_DIR}")
@@ -61,21 +69,18 @@ execute_process(
   COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
   OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE nanobind_ROOT
 )
+file(TO_CMAKE_PATH "${nanobind_ROOT}" nanobind_ROOT)
+message(STATUS "nanobind_ROOT: ${nanobind_ROOT}")
+
+list(APPEND CMAKE_PREFIX_PATH "${nanobind_ROOT}")
+find_package(nanobind CONFIG REQUIRED)
+
 execute_process(
     COMMAND ${Python_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_path('purelib'))"
     OUTPUT_VARIABLE PYTHON_SITE_PACKAGES
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 message(STATUS "Python site-packages from sysconfig: ${PYTHON_SITE_PACKAGES}")
-
-find_package(nanobind CONFIG REQUIRED)
-# now print whether nanobind was found, print anyway
-if(TARGET nanobind::nanobind)
-message(STATUS "nanobind was found: nanobind::nanobind target is available.")
-else()
-message(WARNING "nanobind was NOT found: nanobind::nanobind target is missing.")
-endif()
-
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
@@ -130,6 +135,7 @@ install(TARGETS parallel_rdkit_core
     INCLUDES DESTINATION include
 )
 install(FILES src/mol.hpp DESTINATION include/parallel_rdkit)
+
 nanobind_add_module(parallel_rdkit_backend STABLE_ABI src/binding.cpp)
 target_link_directories(parallel_rdkit_backend PRIVATE ${RDKIT_LIB_DIR})
 target_link_libraries(parallel_rdkit_backend PRIVATE parallel_rdkit_core ${RDKIT_LIBS} OpenMP::OpenMP_CXX)
@@ -161,15 +167,17 @@ target_include_directories(parallel_rdkit_backend PRIVATE
 if(APPLE)
     set(CMAKE_MACOSX_RPATH ON)
     set(_rpath "@loader_path/../../../")
-else()
+elseif(UNIX AND NOT APPLE)
     set(_rpath "$ORIGIN/../../..")
 endif()
 
-set_target_properties(parallel_rdkit_backend PROPERTIES
-    SKIP_BUILD_RPATH FALSE
-    BUILD_WITH_INSTALL_RPATH TRUE
-    INSTALL_RPATH "${_rpath}"
-)
+if(UNIX AND NOT APPLE)
+    set_target_properties(parallel_rdkit_backend PROPERTIES
+        SKIP_BUILD_RPATH FALSE
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "${_rpath}"
+    )
+endif()
 
 install(
     TARGETS parallel_rdkit_backend

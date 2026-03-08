@@ -32,13 +32,14 @@ std::string msready_smiles(const std::string& smiles) {
 
     try {
         // 1. Cleanup (Metal Disconnection, Normalization, Reionization)
-        std::unique_ptr<RWMol> clean_mol(MolStandardize::cleanup(*mol));
+        MolStandardize::CleanupParameters cleanup_params;
+        std::unique_ptr<RWMol> clean_mol(MolStandardize::cleanup(*mol, cleanup_params));
 
         // 2. Fragment Parent (Salt Stripping)
-        std::unique_ptr<RWMol> frag_parent(MolStandardize::fragmentParent(*clean_mol));
+        std::unique_ptr<RWMol> frag_parent(MolStandardize::fragmentParent(*clean_mol, cleanup_params));
 
         // 3. Charge Parent (Neutralization)
-        std::unique_ptr<RWMol> charge_parent(MolStandardize::chargeParent(*frag_parent));
+        std::unique_ptr<RWMol> charge_parent(MolStandardize::chargeParent(*frag_parent, cleanup_params));
 
         // 4. Tautomer Canonicalization
         MolStandardize::TautomerEnumerator te;
@@ -56,12 +57,12 @@ std::string msready_smiles(const std::string& smiles) {
 
 template <typename Func, typename R = std::invoke_result_t<Func, std::string>>
 std::vector<R> process_parallel(const std::vector<std::string>& inputs, Func func) {
-    size_t n = inputs.size();
+    long n = inputs.size();
     std::vector<R> results(n);
 
     // Use static schedule with chunk size of 500 as requested
     #pragma omp parallel for schedule(static, 500)
-    for (size_t i = 0; i < n; ++i) {
+    for (long i = 0; i < n; ++i) {
         try {
             results[i] = func(inputs[i]);
         } catch (...) {
@@ -111,13 +112,13 @@ std::vector<std::string> smiles_to_inchikey_parallel(const std::vector<std::stri
 }
 
 std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::string>> msready_inchi_inchikey_parallel(const std::vector<std::string>& smiles) {
-    size_t n = smiles.size();
+    long n = smiles.size();
     std::vector<std::string> msready_vec(n);
     std::vector<std::string> inchi_vec(n);
     std::vector<std::string> inchikey_vec(n);
 
     #pragma omp parallel for schedule(static, 500)
-    for (size_t i = 0; i < n; ++i) {
+    for (long i = 0; i < n; ++i) {
         std::unique_ptr<RWMol> mol(SmilesToMol(smiles[i]));
         if (!mol) {
             msready_vec[i] = "";
@@ -137,9 +138,10 @@ std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::
         } catch (...) {}
         
         try {
-            std::unique_ptr<RWMol> clean_mol(MolStandardize::cleanup(*mol));
-            std::unique_ptr<RWMol> frag_parent(MolStandardize::fragmentParent(*clean_mol));
-            std::unique_ptr<RWMol> charge_parent(MolStandardize::chargeParent(*frag_parent));
+            MolStandardize::CleanupParameters cleanup_params;
+        std::unique_ptr<RWMol> clean_mol(MolStandardize::cleanup(*mol, cleanup_params));
+        std::unique_ptr<RWMol> frag_parent(MolStandardize::fragmentParent(*clean_mol, cleanup_params));
+        std::unique_ptr<RWMol> charge_parent(MolStandardize::chargeParent(*frag_parent, cleanup_params));
             MolStandardize::TautomerEnumerator te;
             te.setRemoveBondStereo(true);
             te.setRemoveSp3Stereo(true);
@@ -156,7 +158,7 @@ std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::
 }
 
 std::vector<float> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts) {
-    size_t n = smiles.size();
+    long n = smiles.size();
     size_t fpSize = opts.fpSize;
     std::vector<float> results(n * fpSize, 0.0f);
 
@@ -174,7 +176,7 @@ std::vector<float> get_fingerprints_parallel(const std::vector<std::string>& smi
         }
 
         #pragma omp for schedule(static, 500)
-        for (size_t i = 0; i < n; ++i) {
+        for (long i = 0; i < n; ++i) {
             std::unique_ptr<ROMol> mol(SmilesToMol(smiles[i]));
             if (!mol) continue;
 
