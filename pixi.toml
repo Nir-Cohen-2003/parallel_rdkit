@@ -18,6 +18,7 @@ test = { features = ["test"], solve-group = "default" }
 test = { depends-on = ["test-fingerprint", "test-parallel"] }
 test-fingerprint = "pytest tests/test_fingerprint.py"
 test-parallel = "pytest tests/test_parallel.py"
+benchmark-msready = "python benchmarks/benchmark_msready.py"
 
 [feature.test.dependencies]
 pytest = "*"
@@ -26,6 +27,7 @@ polars = "*"
 pyarrow = "*"
 tqdm = "*"
 rdkit = "*"
+psutil = "*"
 parallel_rdkit = { path = "." }
 
 [dependencies]

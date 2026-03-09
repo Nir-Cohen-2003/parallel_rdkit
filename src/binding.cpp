@@ -28,26 +28,34 @@ NB_MODULE(parallel_rdkit_backend, m) {
         .def_rw("targetSize", &parallel_rdkit::FingerprintOptions::targetSize);
 
     m.def("msready_smiles", &parallel_rdkit::msready_smiles, "smiles"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
           "Transforms a SMILES string into an MS-Ready SMILES string.");
 
     m.def("msready_smiles_parallel", &parallel_rdkit::msready_smiles_parallel, "smiles"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
           "Parallel MS-Ready transformation of SMILES.");
 
     m.def("sanitize_smiles_parallel", &parallel_rdkit::sanitize_smiles_parallel, "smiles"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
           "Parallel SMILES sanitization.");
 
     m.def("inchi_to_smiles_parallel", &parallel_rdkit::inchi_to_smiles_parallel, "inchis"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
           "Parallel InChI to SMILES conversion.");
 
     m.def("smiles_to_inchi_parallel", &parallel_rdkit::smiles_to_inchi_parallel, "smiles"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
           "Parallel SMILES to InChI conversion.");
 
     m.def("smiles_to_inchikey_parallel", &parallel_rdkit::smiles_to_inchikey_parallel, "smiles"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
           "Parallel SMILES to InChIKey conversion.");
 
     m.def("msready_inchi_inchikey_parallel", &parallel_rdkit::msready_inchi_inchikey_parallel, "smiles"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
           "Parallel conversion to MS-Ready SMILES, InChI, and InChIKey simultaneously.");
 
     m.def("get_fingerprints_parallel", &parallel_rdkit::get_fingerprints_parallel, "smiles"_a, "opts"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
           "Parallel fingerprint generation.");
 }
