@@ -50,15 +50,8 @@ jobs:
                   name: conda-dist-${{ matrix.os }}
                   path: "*.conda"
 
-            - name: Publish to PyPI
-              if: github.event_name == 'release' && github.event.action == 'published'
-              uses: pypa/gh-action-pypi-publish@release/v1
-              with:
-                  packages-dir: dist/
-              continue-on-error: true
-
             - name: Publish to prefix.dev
-              if: github.event_name == 'release' && github.event.action == 'published'
+              if: github.event_name == 'release'
               run: |
                   for package in *.conda; do
                     pixi project channel upload --host https://prefix.dev prefix-dev "$package" || true
