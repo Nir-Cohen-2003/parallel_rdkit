@@ -1,4 +1,4 @@
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Union
 
 import numpy as np
 
@@ -74,9 +74,18 @@ class FingerprintParams:
         return opts
 
 
-def get_fp_list(smiles: Iterable[str], params: FingerprintParams) -> List[np.ndarray]:
+def get_fp_list(smiles: Iterable[str], params: FingerprintParams, return_numpy: bool = True) -> Union[List[np.ndarray], np.ndarray]:
     """
-    Get a list of fingerprints for a list of SMILES strings.
+    Get fingerprints for a list of SMILES strings.
+    
+    Args:
+        smiles: Iterable of SMILES strings.
+        params: Fingerprint parameters.
+        return_numpy: If True (default), returns a 2D numpy array of shape (N, fp_size). 
+                      If False, returns a list of 1D numpy arrays.
+                      
+    Returns:
+        A 2D numpy array if return_numpy is True, else a list of 1D numpy arrays.
     """
     if not isinstance(smiles, list):
         smiles = list(smiles)
@@ -93,4 +102,7 @@ def get_fp_list(smiles: Iterable[str], params: FingerprintParams) -> List[np.nda
     if params.fp_type == "maccs":
         arr = arr[:, :167]
 
+    if return_numpy:
+        return arr
+    
     return [arr[i] for i in range(n)]

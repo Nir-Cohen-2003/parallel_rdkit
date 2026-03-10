@@ -54,6 +54,6 @@ jobs:
               if: github.event_name == 'release'
               run: |
                   for package in *.conda; do
-                    pixi project channel upload --host https://prefix.dev prefix-dev "$package" || true
+                    pixi upload prefix --skip-existing --channel nir-cohen "$package" || true
                   done
               shell: bash
