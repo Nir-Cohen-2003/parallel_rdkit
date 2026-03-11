@@ -10,9 +10,10 @@ def test_morgan_fp():
     params = FingerprintParams(fp_type='morgan', radius=2, fpSize=2048)
     
     # Get FPs using the new backend
-    fps = get_fp_list(smiles, params)
+    fps, valid = get_fp_list(smiles, params)
     
     assert len(fps) == 3
+    assert valid.all()
     assert fps[0].shape == (2048,)
     
     # Verify against RDKit directly
@@ -29,9 +30,10 @@ def test_rdkit_fp():
     smiles = ["CCO", "CCN", "CCC"]
     params = FingerprintParams(fp_type='rdkit', minPath=1, maxPath=7, fpSize=2048)
     
-    fps = get_fp_list(smiles, params)
+    fps, valid = get_fp_list(smiles, params)
     
     assert len(fps) == 3
+    assert valid.all()
     assert fps[0].shape == (2048,)
     
     for s, fp in zip(smiles, fps):
@@ -47,9 +49,10 @@ def test_maccs_fp():
     smiles = ["CCO", "CCN", "CCC"]
     params = FingerprintParams(fp_type='maccs')
     
-    fps = get_fp_list(smiles, params)
+    fps, valid = get_fp_list(smiles, params)
     
     assert len(fps) == 3
+    assert valid.all()
     assert fps[0].shape == (167,)
     
     for s, fp in zip(smiles, fps):
@@ -64,9 +67,10 @@ def test_atompair_fp():
     smiles = ["CCO", "CCN", "CCC"]
     params = FingerprintParams(fp_type='atompair', fpSize=2048)
     
-    fps = get_fp_list(smiles, params)
+    fps, valid = get_fp_list(smiles, params)
     
     assert len(fps) == 3
+    assert valid.all()
     assert fps[0].shape == (2048,)
     
     for s, fp in zip(smiles, fps):
@@ -82,9 +86,10 @@ def test_torsion_fp():
     smiles = ["CCO", "CCN", "CCC"]
     params = FingerprintParams(fp_type='torsion', fpSize=2048)
     
-    fps = get_fp_list(smiles, params)
+    fps, valid = get_fp_list(smiles, params)
     
     assert len(fps) == 3
+    assert valid.all()
     assert fps[0].shape == (2048,)
     
     for s, fp in zip(smiles, fps):
@@ -100,7 +105,8 @@ def test_count_fp():
     smiles = ["CCO", "CCN", "CCC"]
     params = FingerprintParams(fp_type='morgan', radius=2, fpSize=2048, fp_method='GetCountFingerprint')
     
-    fps = get_fp_list(smiles, params)
+    fps, valid = get_fp_list(smiles, params)
+    assert valid.all()
     
     for s, fp in zip(smiles, fps):
         mol = Chem.MolFromSmiles(s)

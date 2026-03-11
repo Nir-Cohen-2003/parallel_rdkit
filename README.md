@@ -35,18 +35,18 @@ Returns a tuple of lists: (list of MS-Ready SMILES, list of InChIs, list of InCh
 
 ### Module: `parallel_rdkit.fingerprint`
 
-#### `get_fp_list(smiles: Iterable[str], params: FingerprintParams, return_numpy: bool = True) -> Union[List[np.ndarray], np.ndarray]`
+#### `get_fp_list(smiles: Iterable[str], params: FingerprintParams, return_numpy: bool = True) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], List[bool]]]`
 
 Get fingerprints for a list of SMILES strings.
 
 Args:
     smiles: Iterable of SMILES strings.
     params: Fingerprint parameters.
-    return_numpy: If True (default), returns a 2D numpy array of shape (N, fp_size). 
-                  If False, returns a list of 1D numpy arrays.
+    return_numpy: If True (default), returns a tuple of (2D numpy array, 1D boolean array). 
+                  If False, returns a tuple of (list of 1D numpy arrays, list of bools).
                   
 Returns:
-    A 2D numpy array if return_numpy is True, else a list of 1D numpy arrays.
+    A tuple (fingerprints, valid_mask). `valid_mask` is an array of booleans where `True` means the molecule was processed successfully and `False` means an error occurred (e.g., invalid SMILES).
 
 ### Module: `parallel_rdkit.matrix_tanimoto`
 

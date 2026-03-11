@@ -1,4 +1,4 @@
-from typing import Iterable, List, Optional, Union
+from typing import Iterable, List, Optional, Union, Tuple
 
 import numpy as np
 
@@ -74,35 +74,36 @@ class FingerprintParams:
         return opts
 
 
-def get_fp_list(smiles: Iterable[str], params: FingerprintParams, return_numpy: bool = True) -> Union[List[np.ndarray], np.ndarray]:
+def get_fp_list(smiles: Iterable[str], params: FingerprintParams, return_numpy: bool = True) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], List[bool]]]:
     """
     Get fingerprints for a list of SMILES strings.
     
     Args:
         smiles: Iterable of SMILES strings.
         params: Fingerprint parameters.
-        return_numpy: If True (default), returns a 2D numpy array of shape (N, fp_size). 
-                      If False, returns a list of 1D numpy arrays.
+        return_numpy: If True (default), returns a tuple of (2D numpy array, 1D boolean array). 
+                      If False, returns a tuple of (list of 1D numpy arrays, list of bools).
                       
     Returns:
-        A 2D numpy array if return_numpy is True, else a list of 1D numpy arrays.
+        A tuple (fingerprints, valid_mask).
     """
     if not isinstance(smiles, list):
         smiles = list(smiles)
 
-    # C++ returns a flattened float vector
-    flattened = get_fingerprints_parallel(smiles, params.to_backend_opts())
+    # C++ returns a tuple (flattened float vector, valid bool vector)
+    flattened, valid = get_fingerprints_parallel(smiles, params.to_backend_opts())
 
     n = len(smiles)
     stride = params.fpSize
 
     # Reshape and convert to numpy arrays
     arr = np.array(flattened, dtype=np.float32).reshape(n, stride)
+    valid_arr = np.array(valid, dtype=bool)
 
     if params.fp_type == "maccs":
         arr = arr[:, :167]
 
     if return_numpy:
-        return arr
+        return arr, valid_arr
     
-    return [arr[i] for i in range(n)]
+    return [arr[i] for i in range(n)], valid_arr.tolist()

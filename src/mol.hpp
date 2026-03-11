@@ -1,3 +1,4 @@
+#include <cstdint>
 #pragma once
 
 #include <string>
@@ -32,6 +33,6 @@ std::vector<std::string> smiles_to_inchi_parallel(const std::vector<std::string>
 std::vector<std::string> smiles_to_inchikey_parallel(const std::vector<std::string>& smiles);
 std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::string>> msready_inchi_inchikey_parallel(const std::vector<std::string>& smiles);
 
-std::vector<float> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts);
+std::tuple<std::vector<float>, std::vector<uint8_t>> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts);
 
 } // namespace parallel_rdkit

@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "mol.hpp"
 #include <GraphMol/GraphMol.h>
 #include <GraphMol/SmilesParse/SmilesParse.h>
@@ -157,10 +158,11 @@ std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::
     return {msready_vec, inchi_vec, inchikey_vec};
 }
 
-std::vector<float> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts) {
+std::tuple<std::vector<float>, std::vector<uint8_t>> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts) {
     long n = smiles.size();
     size_t fpSize = opts.fpSize;
     std::vector<float> results(n * fpSize, 0.0f);
+    std::vector<uint8_t> valid(n, 0);
 
     #pragma omp parallel
     {
@@ -177,50 +179,60 @@ std::vector<float> get_fingerprints_parallel(const std::vector<std::string>& smi
 
         #pragma omp for schedule(static, 500)
         for (long i = 0; i < n; ++i) {
-            std::unique_ptr<ROMol> mol(SmilesToMol(smiles[i]));
-            if (!mol) continue;
+            try {
+                std::unique_ptr<ROMol> mol(SmilesToMol(smiles[i]));
+                if (!mol) continue;
 
-            if (opts.fp_type == "maccs") {
-                std::unique_ptr<ExplicitBitVect> fp(RDKit::MACCSFingerprints::getFingerprintAsBitVect(*mol));
-                if (fp) {
-                    for (unsigned int j = 0; j < fp->getNumBits() && j < fpSize; ++j) {
-                        if (fp->getBit(j)) results[i * fpSize + j] = 1.0f;
-                    }
-                }
-            } else if (fpgen) {
-                if (opts.fp_method == "GetFingerprint") {
-                    std::unique_ptr<ExplicitBitVect> fp(fpgen->getFingerprint(*mol));
+                if (opts.fp_type == "maccs") {
+                    std::unique_ptr<ExplicitBitVect> fp(RDKit::MACCSFingerprints::getFingerprintAsBitVect(*mol));
                     if (fp) {
                         for (unsigned int j = 0; j < fp->getNumBits() && j < fpSize; ++j) {
                             if (fp->getBit(j)) results[i * fpSize + j] = 1.0f;
                         }
+                        valid[i] = 1;
                     }
-                } else if (opts.fp_method == "GetCountFingerprint") {
-                    std::unique_ptr<SparseIntVect<std::uint32_t>> fp(fpgen->getCountFingerprint(*mol));
-                    if (fp) {
-                        for (const auto& it : fp->getNonzeroElements()) {
-                            results[i * fpSize + (it.first % fpSize)] += it.second;
+                } else if (fpgen) {
+                    if (opts.fp_method == "GetFingerprint") {
+                        std::unique_ptr<ExplicitBitVect> fp(fpgen->getFingerprint(*mol));
+                        if (fp) {
+                            for (unsigned int j = 0; j < fp->getNumBits() && j < fpSize; ++j) {
+                                if (fp->getBit(j)) results[i * fpSize + j] = 1.0f;
+                            }
+                            valid[i] = 1;
                         }
-                    }
-                } else if (opts.fp_method == "GetSparseFingerprint") {
-                    std::unique_ptr<SparseBitVect> fp(fpgen->getSparseFingerprint(*mol));
-                    if (fp) {
-                        for (int bit : *fp->getBitSet()) {
-                            results[i * fpSize + (static_cast<size_t>(bit) % fpSize)] = 1.0f;
+                    } else if (opts.fp_method == "GetCountFingerprint") {
+                        std::unique_ptr<SparseIntVect<std::uint32_t>> fp(fpgen->getCountFingerprint(*mol));
+                        if (fp) {
+                            for (const auto& it : fp->getNonzeroElements()) {
+                                results[i * fpSize + (it.first % fpSize)] += it.second;
+                            }
+                            valid[i] = 1;
                         }
-                    }
-                } else if (opts.fp_method == "GetSparseCountFingerprint") {
-                    std::unique_ptr<SparseIntVect<std::uint64_t>> fp(fpgen->getSparseCountFingerprint(*mol));
-                    if (fp) {
-                        for (const auto& it : fp->getNonzeroElements()) {
-                            results[i * fpSize + (it.first % fpSize)] += it.second;
+                    } else if (opts.fp_method == "GetSparseFingerprint") {
+                        std::unique_ptr<SparseBitVect> fp(fpgen->getSparseFingerprint(*mol));
+                        if (fp) {
+                            for (int bit : *fp->getBitSet()) {
+                                results[i * fpSize + (static_cast<size_t>(bit) % fpSize)] = 1.0f;
+                            }
+                            valid[i] = 1;
+                        }
+                    } else if (opts.fp_method == "GetSparseCountFingerprint") {
+                        std::unique_ptr<SparseIntVect<std::uint64_t>> fp(fpgen->getSparseCountFingerprint(*mol));
+                        if (fp) {
+                            for (const auto& it : fp->getNonzeroElements()) {
+                                results[i * fpSize + (it.first % fpSize)] += it.second;
+                            }
+                            valid[i] = 1;
                         }
                     }
                 }
+            } catch (...) {
+                // If any exception arises for a single molecule, it remains marked as invalid (valid[i] = 0)
+                // and we continue with the next molecule.
             }
         }
     }
-    return results;
+    return {results, valid};
 }
 
 } // namespace parallel_rdkit

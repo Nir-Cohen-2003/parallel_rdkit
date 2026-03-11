@@ -16,8 +16,10 @@ test = { features = ["test"], solve-group = "default" }
 
 [feature.test.tasks]
 test = { depends-on = ["test-fingerprint", "test-parallel"] }
+test-full = { depends-on = ["test", "test-msready"] }
 test-fingerprint = "pytest tests/test_fingerprint.py"
 test-parallel = "pytest tests/test_parallel.py"
+test-msready = "pytest tests/test_msready_full.py"
 benchmark-msready = "python benchmarks/benchmark_msready.py"
 
 [feature.test.dependencies]
