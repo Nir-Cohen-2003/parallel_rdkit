@@ -88,7 +88,7 @@ elseif (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Ox")
 endif()
 
-add_library(parallel_rdkit_core src/mol.cpp)
+add_library(parallel_rdkit_core src/mol.cpp src/screen_smarts.cpp)
 set_target_properties(parallel_rdkit_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # propagate compile-time flags to the target(s)
@@ -119,6 +119,7 @@ set(RDKIT_LIBS
     RDKitSubstructMatch
     RDKitFingerprints
     RDKitDepictor
+    RDKitSubstructLibrary
 )
 
 target_link_libraries(parallel_rdkit_core PRIVATE
@@ -134,7 +135,7 @@ install(TARGETS parallel_rdkit_core
     ARCHIVE DESTINATION lib
     INCLUDES DESTINATION include
 )
-install(FILES src/mol.hpp DESTINATION include/parallel_rdkit)
+install(FILES src/mol.hpp src/screen_smarts.hpp DESTINATION include/parallel_rdkit)
 
 nanobind_add_module(parallel_rdkit_backend STABLE_ABI src/binding.cpp)
 target_link_directories(parallel_rdkit_backend PRIVATE ${RDKIT_LIB_DIR})
