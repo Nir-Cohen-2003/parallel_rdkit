@@ -3,6 +3,7 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/tuple.h>
 #include "mol.hpp"
+#include "screen_smarts.hpp"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -58,4 +59,22 @@ NB_MODULE(parallel_rdkit_backend, m) {
     m.def("get_fingerprints_parallel", &parallel_rdkit::get_fingerprints_parallel, "smiles"_a, "opts"_a,
           nb::call_guard<nb::gil_scoped_release>(),
           "Parallel fingerprint generation.");
+
+    // ScreenSmarts bindings
+    nb::class_<parallel_rdkit::ScreenSmartsOptions>(m, "ScreenSmartsOptions")
+        .def(nb::init<>())
+        .def_rw("mode", &parallel_rdkit::ScreenSmartsOptions::mode)
+        .def_rw("batch_size", &parallel_rdkit::ScreenSmartsOptions::batch_size)
+        .def_rw("cache_path", &parallel_rdkit::ScreenSmartsOptions::cache_path)
+        .def_rw("output_path", &parallel_rdkit::ScreenSmartsOptions::output_path);
+
+    m.def("screen_smarts_direct", &parallel_rdkit::screen_smarts_direct, 
+          "smiles_file"_a, "smarts_list"_a, "cache_path"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
+          "Screen molecules against SMARTS patterns (direct mode). Returns N x M matrix.");
+
+    m.def("screen_smarts_streaming", &parallel_rdkit::screen_smarts_streaming,
+          "smiles_file"_a, "smarts_list"_a, "batch_size"_a, "cache_path"_a, "output_path"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
+          "Screen molecules against SMARTS patterns (streaming mode). Writes to output_path.npy, returns molecule count.");
 }

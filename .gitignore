@@ -6,3 +6,4 @@ pixi.lock
 **/__pycache__/**
 build/
 dist/
+.pytest_cache

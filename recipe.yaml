@@ -8,6 +8,13 @@ package:
 
 source:
     path: .
+    use_gitignore: true
+    filter:
+        exclude:
+            - tests/**
+            - docs/**
+            - data/**
+            - benchmarks/**
 
 build:
     number: 0
@@ -43,7 +50,7 @@ requirements:
         - python >=3.8
         - rdkit
         - numpy
-        - boost
+        - libboost
 
 tests:
     - python:

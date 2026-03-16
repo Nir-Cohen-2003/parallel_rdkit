@@ -1,16 +1,34 @@
-import pytest
 import polars as pl
+import pytest
+import time
+
 from parallel_rdkit import msready_inchi_inchikey_parallel
 
-def get_msready_inchikeys(smiles_series: pl.Series) -> pl.Series:
-    smiles_list = smiles_series.to_list()
-    # returns (smiles, inchi, inchikey)
-    _, _, inchikeys = msready_inchi_inchikey_parallel(smiles_list)
-    return pl.Series(inchikeys)
 
-def test_msready_pubchem_join(msready_csv_path, pubchem_parquet_path):
+def get_msready_data(smiles_series: pl.Series) -> pl.DataFrame:
+    """Returns DataFrame with columns: msready_smiles, inchi, inchikey"""
+    smiles_list = smiles_series.to_list()
+    num_smiles = len(smiles_list)
+
+    start_time = time.perf_counter()
+    msready_smiles, _, inchikeys = msready_inchi_inchikey_parallel(smiles_list)
+    elapsed = time.perf_counter() - start_time
+
+    time_per_smiles = elapsed / num_smiles if num_smiles > 0 else 0
+    print(f"\n[MS-Ready Timing] Total: {elapsed:.3f}s | Count: {num_smiles} | Per SMILES: {time_per_smiles:.6f}s")
+
+    return pl.DataFrame({
+        "msready_smiles_generated": pl.Series(msready_smiles),
+        "inchikey_msready": pl.Series(inchikeys)
+    })
+
+
+def test_msready_pubchem_join(msready_csv_path, pubchem_parquet_path, num_examples):
     if not msready_csv_path or not pubchem_parquet_path:
-        pytest.skip("--msready-csv and --pubchem-parquet args required for full test")
+        pytest.skip("-D/--dump and -P/--pubchem-parquet args required for full test")
+    
+    if not msready_csv_path:
+        pytest.skip(f"No CSV files found in dump path")
 
     schema = {
         "DTXSID": pl.String,
@@ -25,14 +43,14 @@ def test_msready_pubchem_join(msready_csv_path, pubchem_parquet_path):
         "MONOISOTOPIC_MASS": pl.Float64,
         "QSAR_READY_SMILES": pl.String,
         "MS_READY_SMILES": pl.String,
-        "IDENTIFIER": pl.String
+        "IDENTIFIER": pl.String,
     }
 
-    df_csv = (
-        pl.scan_csv(msready_csv_path, schema=schema)
-        .with_columns(
-            pl.col("INCHIKEY").str.split("-").list.get(0).alias("base_inchikey")
-        )
+    df_csv = pl.scan_csv(msready_csv_path, schema=schema)
+    if num_examples is not None:
+        df_csv = df_csv.head(num_examples)
+    df_csv = df_csv.with_columns(
+        pl.col("INCHIKEY").str.split("-").list.get(0).alias("base_inchikey")
     )
 
     df_pubchem = (
@@ -51,22 +69,53 @@ def test_msready_pubchem_join(msready_csv_path, pubchem_parquet_path):
     )
 
     # join them
-    mismatches_lf = (
-        df_csv.join(df_pubchem, on="base_inchikey")
-        .with_columns(
-            pl.col("smiles_pubchem")
-            .map_batches(get_msready_inchikeys, return_dtype=pl.String)
-            .alias("inchikey_msready")
-        )
-        .with_columns(
-            pl.col("inchikey_msready").str.split("-").list.get(0).alias("base_inchikey_msready")
-        )
-        .filter(pl.col("base_inchikey") != pl.col("base_inchikey_msready"))
-        .select(["base_inchikey", "smiles_pubchem", "inchikey_msready", "base_inchikey_msready"])
+    joined_lf = df_csv.join(df_pubchem, on="base_inchikey")
+    
+    # run it all with lazyframes, streaming engine first to get smiles
+    joined_df = joined_lf.collect(engine="streaming")
+    
+    # Apply MS-Ready conversion and get generated smiles + inchikeys
+    msready_data = get_msready_data(joined_df["smiles_pubchem"])
+    
+    # Combine results
+    joined_df = joined_df.with_columns([
+        msready_data["msready_smiles_generated"],
+        msready_data["inchikey_msready"]
+    ]).with_columns(
+        pl.col("inchikey_msready")
+        .str.split("-")
+        .list.get(0)
+        .alias("base_inchikey_msready")
+    )
+    
+    # Filter mismatches, excluding expected inorganics (both code and dump agree no MS-Ready form)
+    mismatches = joined_df.filter(
+        (pl.col("base_inchikey") != pl.col("base_inchikey_msready")) &
+        ~((pl.col("msready_smiles_generated") == "<INORGANIC>") & (pl.col("MS_READY_SMILES").is_null()))
     )
 
-    # run it all with lazyframes, streaming engine
-    mismatches = mismatches_lf.collect(streaming=True)
-    
-    assert len(mismatches) == 0, f"Found {len(mismatches)} mismatches in base inchikey"
-
+    if len(mismatches) > 0:
+        # Write detailed errors to file
+        with open("msready_errors.txt", "w") as f:
+            f.write("MS-Ready SMILES Mismatch Report\n")
+            f.write("=" * 100 + "\n\n")
+            f.write("Columns:\n")
+            f.write("  - base_inchikey_correct:      Expected/correct base InChIKey (from join)\n")
+            f.write("  - base_inchikey_generated:    Generated base InChIKey from our MS-Ready SMILES\n")
+            f.write("  - smiles_pubchem:             Original SMILES from PubChem\n")
+            f.write("  - msready_smiles_dump:        MS-Ready SMILES from the dump file\n")
+            f.write("  - msready_smiles_generated:   MS-Ready SMILES generated by our code\n")
+            f.write("\n")
+            f.write(f"Found {len(mismatches)} mismatches:\n\n")
+            
+            for i, row in enumerate(mismatches.iter_rows(named=True), 1):
+                f.write(f"Mismatch #{i}\n")
+                f.write("-" * 100 + "\n")
+                f.write(f"  base_inchikey_correct:    {row['base_inchikey']}\n")
+                f.write(f"  base_inchikey_generated:  {row['base_inchikey_msready']}\n")
+                f.write(f"  smiles_pubchem:           {row['smiles_pubchem']}\n")
+                f.write(f"  msready_smiles_dump:      {row['MS_READY_SMILES']}\n")
+                f.write(f"  msready_smiles_generated: {row['msready_smiles_generated']}\n")
+                f.write("\n")
+        
+        assert False, f"Found {len(mismatches)} mismatches. Details written to msready_errors.txt"

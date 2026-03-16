@@ -11,18 +11,18 @@ authors = ["Nir Cohen"]
 backend = { name = "pixi-build-rattler-build", version = "*" }
 
 [environments]
-default = { solve-group = "default" }
 test = { features = ["test"], solve-group = "default" }
-
+gpu = {features= ["gpu"], solve-group="gpu"}
 [feature.test.tasks]
 test = { depends-on = ["test-fingerprint", "test-parallel"] }
 test-full = { depends-on = ["test", "test-msready"] }
 test-fingerprint = "pytest tests/test_fingerprint.py"
 test-parallel = "pytest tests/test_parallel.py"
-test-msready = "pytest tests/test_msready_full.py"
+test-msready = "pytest tests/test_msready_full.py -D data/DSSTox.csv"
 benchmark-msready = "python benchmarks/benchmark_msready.py"
 
 [feature.test.dependencies]
+parallel_rdkit = { path = "." }
 pytest = "*"
 numpy = "*"
 polars = "*"
@@ -30,9 +30,15 @@ pyarrow = "*"
 tqdm = "*"
 rdkit = "*"
 psutil = "*"
-parallel_rdkit = { path = "." }
 
-[dependencies]
-python = "3.12.*"
-rattler-build = "*"
-# parallel_rdkit = { path = "." }
+
+[feature.gpu.target.linux-64.dependencies]
+parallel_rdkit = { path = "." }
+pytest = "*"
+numpy = "*"
+polars = "*"
+pyarrow = "*"
+tqdm = "*"
+rdkit = "*"
+psutil = "*"
+nvmolkit="*"

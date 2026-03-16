@@ -27,20 +27,38 @@ namespace parallel_rdkit {
 
 using namespace RDKit;
 
+// Helper function to check if a molecule has any carbon atoms
+bool has_carbon(const ROMol& mol) {
+    for (const auto& atom : mol.atoms()) {
+        if (atom->getAtomicNum() == 6) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::string msready_smiles(const std::string& smiles) {
-    std::unique_ptr<RWMol> mol(SmilesToMol(smiles));
+    std::unique_ptr<RWMol> mol;
+    try {
+        mol.reset(SmilesToMol(smiles));
+    } catch (...) {
+        return "";
+    }
     if (!mol) return "";
 
     try {
         // 1. Cleanup (Metal Disconnection, Normalization, Reionization)
         MolStandardize::CleanupParameters cleanup_params;
         std::unique_ptr<RWMol> clean_mol(MolStandardize::cleanup(*mol, cleanup_params));
+        if (!clean_mol) return "";
 
         // 2. Fragment Parent (Salt Stripping)
         std::unique_ptr<RWMol> frag_parent(MolStandardize::fragmentParent(*clean_mol, cleanup_params));
+        if (!frag_parent) return "";
 
         // 3. Charge Parent (Neutralization)
         std::unique_ptr<RWMol> charge_parent(MolStandardize::chargeParent(*frag_parent, cleanup_params));
+        if (!charge_parent) return "";
 
         // 4. Tautomer Canonicalization
         MolStandardize::TautomerEnumerator te;
@@ -48,8 +66,14 @@ std::string msready_smiles(const std::string& smiles) {
         te.setRemoveSp3Stereo(true);
         
         std::unique_ptr<ROMol> ms_ready_mol(te.canonicalize(*charge_parent));
+        if (!ms_ready_mol) return "";
 
-        // 5. Final SMILES generation (isomeric=false, canonical=true)
+        // 5. Check if result has any carbon atoms (organic part)
+        if (!has_carbon(*ms_ready_mol)) {
+            return "<INORGANIC>";
+        }
+
+        // 6. Final SMILES generation (isomeric=false, canonical=true)
         return MolToSmiles(*ms_ready_mol, false, false);
     } catch (...) {
         return "";
@@ -81,35 +105,78 @@ std::vector<std::string> msready_smiles_parallel(const std::vector<std::string>&
 }
 
 std::vector<std::string> sanitize_smiles_parallel(const std::vector<std::string>& smiles) {
-    return process_parallel(smiles, [](const std::string& s) {
-        std::unique_ptr<ROMol> mol(SmilesToMol(s));
-        return mol ? MolToSmiles(*mol, false, false) : std::string("");
+    return process_parallel(smiles, [](const std::string& s) -> std::string {
+        try {
+            std::unique_ptr<ROMol> mol(SmilesToMol(s));
+            return mol ? MolToSmiles(*mol, false, false) : std::string("");
+        } catch (...) {
+            return "";
+        }
     });
 }
 
+// Single-threaded versions for INCHI operations (not thread-safe)
+// These are called from Python multiprocessing to ensure thread safety
+
 std::vector<std::string> inchi_to_smiles_parallel(const std::vector<std::string>& inchis) {
-    return process_parallel(inchis, [](const std::string& inchi) {
-        ExtraInchiReturnValues rv;
-        std::unique_ptr<ROMol> mol(InchiToMol(inchi, rv));
-        return mol ? MolToSmiles(*mol, false, false) : std::string("");
-    });
+    long n = inchis.size();
+    std::vector<std::string> results(n);
+    
+    // Single-threaded: INCHI library is not thread-safe
+    for (long i = 0; i < n; ++i) {
+        try {
+            ExtraInchiReturnValues rv;
+            std::unique_ptr<ROMol> mol(InchiToMol(inchis[i], rv));
+            results[i] = mol ? MolToSmiles(*mol, false, false) : std::string("");
+        } catch (...) {
+            results[i] = "";
+        }
+    }
+    
+    return results;
 }
 
 std::vector<std::string> smiles_to_inchi_parallel(const std::vector<std::string>& smiles) {
-    return process_parallel(smiles, [](const std::string& s) {
-        std::unique_ptr<ROMol> mol(SmilesToMol(s));
-        if (!mol) return std::string("");
-        ExtraInchiReturnValues rv;
-        return MolToInchi(*mol, rv);
-    });
+    long n = smiles.size();
+    std::vector<std::string> results(n);
+    
+    // Single-threaded: INCHI library is not thread-safe
+    for (long i = 0; i < n; ++i) {
+        try {
+            std::unique_ptr<ROMol> mol(SmilesToMol(smiles[i]));
+            if (!mol) {
+                results[i] = "";
+            } else {
+                ExtraInchiReturnValues rv;
+                results[i] = MolToInchi(*mol, rv);
+            }
+        } catch (...) {
+            results[i] = "";
+        }
+    }
+    
+    return results;
 }
 
 std::vector<std::string> smiles_to_inchikey_parallel(const std::vector<std::string>& smiles) {
-    return process_parallel(smiles, [](const std::string& s) {
-        std::unique_ptr<ROMol> mol(SmilesToMol(s));
-        if (!mol) return std::string("");
-        return MolToInchiKey(*mol);
-    });
+    long n = smiles.size();
+    std::vector<std::string> results(n);
+    
+    // Single-threaded: INCHI library is not thread-safe
+    for (long i = 0; i < n; ++i) {
+        try {
+            std::unique_ptr<ROMol> mol(SmilesToMol(smiles[i]));
+            if (!mol) {
+                results[i] = "";
+            } else {
+                results[i] = MolToInchiKey(*mol);
+            }
+        } catch (...) {
+            results[i] = "";
+        }
+    }
+    
+    return results;
 }
 
 std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::string>> msready_inchi_inchikey_parallel(const std::vector<std::string>& smiles) {
@@ -117,10 +184,24 @@ std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::
     std::vector<std::string> msready_vec(n);
     std::vector<std::string> inchi_vec(n);
     std::vector<std::string> inchikey_vec(n);
-
-    #pragma omp parallel for schedule(static, 500)
+    
+    // Single-threaded: INCHI library is not thread-safe
     for (long i = 0; i < n; ++i) {
-        std::unique_ptr<RWMol> mol(SmilesToMol(smiles[i]));
+        std::string inchi = "";
+        std::string inchikey = "";
+        std::string msready = "";
+        
+        std::unique_ptr<RWMol> mol;
+        try {
+            mol.reset(SmilesToMol(smiles[i]));
+        } catch (...) {
+            // Invalid SMILES (e.g., bad valence) - return empty strings
+            msready_vec[i] = "";
+            inchi_vec[i] = "";
+            inchikey_vec[i] = "";
+            continue;
+        }
+        
         if (!mol) {
             msready_vec[i] = "";
             inchi_vec[i] = "";
@@ -128,26 +209,47 @@ std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::
             continue;
         }
         
-        std::string inchi = "";
-        std::string inchikey = "";
-        std::string msready = "";
-        
+        // InChI library is not thread-safe - single threaded execution
         try {
             ExtraInchiReturnValues rv;
             inchi = MolToInchi(*mol, rv);
             inchikey = MolToInchiKey(*mol);
-        } catch (...) {}
+        } catch (...) {
+            inchi = "";
+            inchikey = "";
+        }
         
         try {
             MolStandardize::CleanupParameters cleanup_params;
-        std::unique_ptr<RWMol> clean_mol(MolStandardize::cleanup(*mol, cleanup_params));
-        std::unique_ptr<RWMol> frag_parent(MolStandardize::fragmentParent(*clean_mol, cleanup_params));
-        std::unique_ptr<RWMol> charge_parent(MolStandardize::chargeParent(*frag_parent, cleanup_params));
-            MolStandardize::TautomerEnumerator te;
-            te.setRemoveBondStereo(true);
-            te.setRemoveSp3Stereo(true);
-            std::unique_ptr<ROMol> ms_ready_mol(te.canonicalize(*charge_parent));
-            msready = MolToSmiles(*ms_ready_mol, false, false);
+            std::unique_ptr<RWMol> clean_mol(MolStandardize::cleanup(*mol, cleanup_params));
+            if (!clean_mol) {
+                msready = "";
+            } else {
+                std::unique_ptr<RWMol> frag_parent(MolStandardize::fragmentParent(*clean_mol, cleanup_params));
+                if (!frag_parent) {
+                    msready = "";
+                } else {
+                    std::unique_ptr<RWMol> charge_parent(MolStandardize::chargeParent(*frag_parent, cleanup_params));
+                    if (!charge_parent) {
+                        msready = "";
+                    } else {
+                        MolStandardize::TautomerEnumerator te;
+                        te.setRemoveBondStereo(true);
+                        te.setRemoveSp3Stereo(true);
+                        std::unique_ptr<ROMol> ms_ready_mol(te.canonicalize(*charge_parent));
+                        if (!ms_ready_mol) {
+                            msready = "";
+                        } else {
+                            // Check if result has any carbon atoms (organic part)
+                            if (!has_carbon(*ms_ready_mol)) {
+                                msready = "<INORGANIC>";
+                            } else {
+                                msready = MolToSmiles(*ms_ready_mol, false, false);
+                            }
+                        }
+                    }
+                }
+            }
         } catch (...) {}
         
         msready_vec[i] = msready;

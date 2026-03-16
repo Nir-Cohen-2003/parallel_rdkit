@@ -1,5 +1,15 @@
 # Parallel RDKit
 
+## MS-Ready SMILES
+
+MS-Ready (Mass Spectrometry Ready) SMILES are standardized molecular representations designed for mass spectrometry analysis. The standardization process:
+
+1. **Cleanup**: Metal disconnection, normalization, and reionization
+2. **Fragment Parent**: Salt stripping (removes counterions)
+3. **Charge Parent**: Neutralization (removes charges)
+4. **Tautomer Canonicalization**: Converts to canonical tautomer form
+5. **Carbon Check**: Only organic molecules (containing carbon) produce MS-Ready SMILES
+
 ## Function Documentation
 
 ### Module: `parallel_rdkit`
@@ -8,9 +18,19 @@
 
 Transforms a SMILES string into an MS-Ready SMILES string.
 
+**Return Values:**
+- Valid MS-Ready SMILES string for organic molecules (containing carbon)
+- `"<INORGANIC>"` for inorganic molecules (no carbon atoms), indicating no MS-Ready form exists
+- `""` for invalid/parse errors
+
 #### `msready_smiles_parallel(smiles: Iterable[str]) -> List[str]`
 
 Parallel MS-Ready transformation of SMILES.
+
+Returns a list where each element follows the same convention as `msready_smiles()`:
+- MS-Ready SMILES for organic molecules
+- `"<INORGANIC>"` for inorganic molecules (no carbon atoms)
+- `""` for invalid molecules
 
 #### `sanitize_smiles_parallel(smiles: Iterable[str]) -> List[str]`
 
@@ -33,7 +53,32 @@ Parallel SMILES to InChIKey conversion.
 Parallel conversion to MS-Ready SMILES, InChI, and InChIKey simultaneously.
 Returns a tuple of lists: (list of MS-Ready SMILES, list of InChIs, list of InChIKeys)
 
+The MS-Ready SMILES list follows the same convention as `msready_smiles()`:
+- MS-Ready SMILES for organic molecules
+- `"<INORGANIC>"` for inorganic molecules (no carbon atoms)
+- `""` for invalid molecules
+
 ### Module: `parallel_rdkit.fingerprint`
+
+#### `class FingerprintParams`
+
+Configuration class for fingerprint parameters.
+
+**Parameters:**
+- `fp_type` (str): Type of fingerprint - "morgan", "atompair", "torsion", "rdkit", or "maccs" (default: "morgan")
+- `fp_method` (str): Fingerprint method - "GetFingerprint" or "GetHashedFingerprint" (default: "GetFingerprint")
+- `fpSize` (int): Number of bits in the fingerprint (default: 2048)
+- `radius` (int): Morgan fingerprint radius (default: 3 for morgan, 2 for others)
+- `useBondTypes` (bool): Include bond types in fingerprint (default: True)
+- `minPath` (int): Minimum path length for RDKit fingerprints (default: 1)
+- `maxPath` (int): Maximum path length for RDKit fingerprints (default: 7)
+- `numBitsPerFeature` (int): Number of bits set per feature for RDKit fingerprints (default: 2)
+- `use2D` (bool): Use 2D coordinates for atom pair/torsion fingerprints (default: True)
+- `minDistance` (int): Minimum distance for atom pair fingerprints (default: 1)
+- `maxDistance` (int): Maximum distance for atom pair/torsion fingerprints (default: 30)
+- `countSimulation` (bool): Use count simulation for atom pair/torsion fingerprints (default: True for these types)
+- `includeChirality` (bool): Include chirality information (default: False)
+- `targetSize` (int): Target size for torsion fingerprints (default: 4)
 
 #### `get_fp_list(smiles: Iterable[str], params: FingerprintParams, return_numpy: bool = True) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], List[bool]]]`
 
@@ -47,6 +92,28 @@ Args:
                   
 Returns:
     A tuple (fingerprints, valid_mask). `valid_mask` is an array of booleans where `True` means the molecule was processed successfully and `False` means an error occurred (e.g., invalid SMILES).
+
+### Module: `parallel_rdkit.screen_smarts`
+
+#### `screen_smarts(smarts_list: List[str], smiles_file: Union[str, Path], mode: str = "direct", batch_size: int = 10000, cache_path: Optional[Union[str, Path]] = None, output_path: Optional[Union[str, Path]] = None) -> Union[np.ndarray, int]`
+
+Screen molecules from a SMILES file against a list of SMARTS patterns.
+
+**Modes:**
+- `mode="direct"`: Loads all molecules into memory and returns an N x M boolean array
+- `mode="streaming"`: Processes molecules in batches and writes results to output file
+
+**Args:**
+- `smarts_list`: List of SMARTS patterns to screen against
+- `smiles_file`: Path to file containing SMILES (one per line)
+- `mode`: Either "direct" or "streaming"
+- `batch_size`: Number of molecules per batch (streaming mode only)
+- `cache_path`: Path to cache file for skipping recomputation
+- `output_path`: Required for streaming mode, path to output .npy file
+
+**Returns:**
+- Direct mode: N x M boolean numpy array (N molecules, M SMARTS patterns)
+- Streaming mode: Number of molecules processed
 
 ### Module: `parallel_rdkit.matrix_tanimoto`
 

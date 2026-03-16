@@ -20,8 +20,8 @@ def test_msready_hcl_salt():
 def test_msready_charge():
     # Phenolate should become phenol
     assert msready_smiles("[O-]c1ccccc1") == "Oc1ccccc1"
-    # Ammonium should become amine
-    assert msready_smiles("[NH4+]") == "N"
+    # Ammonium is inorganic (no carbon), should return sentinel value
+    assert msready_smiles("[NH4+]") == "<INORGANIC>"
 
 def test_msready_tautomer():
     # Imidazole tautomers should canonicalize to the same thing
