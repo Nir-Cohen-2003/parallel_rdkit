@@ -14,6 +14,7 @@ if(PARALLEL_RDKIT_ERROR_COUNT)
   message(STATUS "PARALLEL_RDKIT_ERROR_COUNT enabled")
 endif()
 
+# Use dynamic Boost linking - libraries provided by rdkit dependency at runtime
 find_package(Boost REQUIRED COMPONENTS system serialization iostreams)
 # find_package(Eigen3 REQUIRED)
 

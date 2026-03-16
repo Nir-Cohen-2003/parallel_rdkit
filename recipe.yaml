@@ -32,7 +32,9 @@ requirements:
         - python-build
         - librdkit-dev
         - nanobind
-        - boost
+        # - boost
+        - libboost-devel
+        # - libboost-headers
         - scikit-build-core
         - cmake
         - ninja
@@ -42,7 +44,8 @@ requirements:
         - python-build
         - librdkit-dev
         - nanobind
-        - boost
+        # - boost
+        - libboost-devel == 1.86
         - scikit-build-core
         - cmake
         - ninja
@@ -50,7 +53,6 @@ requirements:
         - python >=3.8
         - rdkit
         - numpy
-        - libboost
 
 tests:
     - python:
