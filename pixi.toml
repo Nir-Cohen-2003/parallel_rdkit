@@ -32,6 +32,9 @@ rdkit = "*"
 psutil = "*"
 
 
+[feature.gpu.tasks]
+test-matrix-similarity = "pytest tests/test_matrix_similarity.py -v"
+
 [feature.gpu.target.linux-64.dependencies]
 parallel_rdkit = { path = "." }
 pytest = "*"
@@ -41,4 +44,7 @@ pyarrow = "*"
 tqdm = "*"
 rdkit = "*"
 psutil = "*"
-nvmolkit="*"
+nvmolkit="==0.2.0"
+pytorch-gpu="*"
+[feature.gpu.system-requirements]
+cuda = "12.0"

@@ -10,6 +10,22 @@ from .screen_smarts import (
     screen_smarts,
 )
 
+# Import similarity matrix functions (GPU-accelerated, requires nvmolkit)
+try:
+    from .matrix_similarity import (
+        calculate_similarity_matrix,
+        calculate_similarity_matrix_streaming,
+        calculate_tanimoto_matrix,
+        calculate_cosine_matrix,
+        calculate_tanimoto_matrix_streaming,
+        calculate_cosine_matrix_streaming,
+        butina_split,
+        umap_split,
+    )
+    _MATRIX_SIMILARITY_AVAILABLE = True
+except ImportError:
+    _MATRIX_SIMILARITY_AVAILABLE = False
+
 __all__ = [
     "msready_smiles",
     "msready_smiles_parallel",
@@ -22,6 +38,14 @@ __all__ = [
     "get_fp_list",
     "get_fp_polars",
     "screen_smarts",
+    "calculate_similarity_matrix",
+    "calculate_similarity_matrix_streaming",
+    "calculate_tanimoto_matrix",
+    "calculate_cosine_matrix",
+    "calculate_tanimoto_matrix_streaming",
+    "calculate_cosine_matrix_streaming",
+    "butina_split",
+    "umap_split",
 ]
 
 
