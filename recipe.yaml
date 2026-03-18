@@ -7,7 +7,7 @@ package:
     version: "${{ version }}"
 
 source:
-    path: .
+    path: ./src
     use_gitignore: true
     filter:
         exclude:
@@ -32,9 +32,7 @@ requirements:
         - python-build
         - librdkit-dev
         - nanobind
-        # - boost
         - libboost-devel == 1.86
-        # - libboost-headers
         - scikit-build-core
         - cmake
         - ninja
@@ -44,7 +42,6 @@ requirements:
         - python-build
         - librdkit-dev
         - nanobind
-        # - boost
         - libboost-devel == 1.86
         - scikit-build-core
         - cmake

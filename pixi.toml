@@ -34,6 +34,7 @@ psutil = "*"
 
 [feature.gpu.tasks]
 test-matrix-similarity = "pytest tests/test_matrix_similarity.py -v"
+benchmark-matrix-similarity = "python benchmarks/benchmark_similarity_matrix.py --sizes 10000 50000 --metric tanimoto --memory-fraction 0.3"
 
 [feature.gpu.target.linux-64.dependencies]
 parallel_rdkit = { path = "." }
