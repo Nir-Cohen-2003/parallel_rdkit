@@ -151,33 +151,46 @@ def _generate_fingerprints_gpu(
     return fps_tensor, valid_indices, valid_smiles
 
 
-def _calculate_chunk_size(n_mols: int, memory_usage_fraction: float = 0.5) -> int:
+def _calculate_square_chunk_size(n_mols: int, memory_usage_fraction: float = 0.5, storage_mode: str = "single") -> int:
     """
-    Calculate chunk size based on available CPU memory.
+    Calculate square chunk dimension based on available CPU memory.
     
-    The similarity matrix for a chunk of size chunk_size x n_mols requires:
-    chunk_size * n_mols * 4 bytes (float32)
+    For square chunking, we process d x d submatrices at a time.
+    The similarity data is stored as triplets in parquet:
+    - Single similarity: 12 bytes per pair (mol1_idx + mol2_idx + similarity)
+    - Both similarities: 16 bytes per pair (mol1_idx + mol2_idx + tanimoto + cosine)
+    
+    For lower triangular storage, each d x d block stores at most d*(d+1)/2 pairs.
     
     Args:
         n_mols: Total number of molecules
         memory_usage_fraction: Fraction of available memory to use (0.0-1.0)
+        storage_mode: "single" for one similarity metric, "both" for tanimoto+cosine
         
     Returns:
-        Number of rows to process per chunk
+        Square dimension d for d x d chunks
     """
     if not PSUTIL_AVAILABLE:
         # Fallback to a reasonable default if psutil not available
         return min(5000, n_mols)
     
     available_bytes = psutil.virtual_memory().available * memory_usage_fraction
-    bytes_per_row = n_mols * 4  # float32 = 4 bytes
     
-    if bytes_per_row == 0:
-        return 1
+    # Bytes per pair: 4 for each uint32 index + 4 for each float32 similarity
+    if storage_mode == "both":
+        bytes_per_pair = 16  # mol1_idx + mol2_idx + tanimoto + cosine
+    else:
+        bytes_per_pair = 12  # mol1_idx + mol2_idx + similarity
     
-    max_chunk_size = int(available_bytes / bytes_per_row)
-    # Ensure at least 1 row per chunk, and cap at n_mols
-    return max(1, min(max_chunk_size, n_mols))
+    # For a d x d square chunk storing lower triangular: d*(d+1)/2 pairs maximum
+    # Memory needed: d*(d+1)/2 * bytes_per_pair <= available_bytes
+    # Approximate: d^2 * bytes_per_pair / 2 <= available_bytes
+    # d <= sqrt(2 * available_bytes / bytes_per_pair)
+    
+    max_d = int((2 * available_bytes / bytes_per_pair) ** 0.5)
+    
+    # Ensure at least 1, and cap at n_mols
+    return max(1, min(max_d, n_mols))
 
 
 def _get_similarity_func(metric: str):
@@ -257,6 +270,72 @@ def _write_similarity_chunk_to_parquet(
     return len(mol1_list)
 
 
+def _write_similarity_chunk_to_parquet_offdiagonal(
+    sim_matrix_chunk: np.ndarray,
+    row_indices: np.ndarray,
+    col_indices: np.ndarray,
+    parquet_writer: pq.ParquetWriter,
+    similarity_column: str = "similarity",
+    threshold: Optional[float] = None,
+) -> int:
+    """
+    Write an off-diagonal chunk of similarity matrix to parquet.
+    
+    For off-diagonal blocks (col_start > row_start), all pairs are valid
+    since col_idx > row_idx always holds.
+    
+    Args:
+        sim_matrix_chunk: Similarity matrix chunk (n_rows x n_cols)
+        row_indices: Row indices for this chunk
+        col_indices: Column indices for this chunk
+        parquet_writer: PyArrow ParquetWriter instance
+        similarity_column: Name of the similarity column
+        threshold: Optional minimum similarity threshold
+        
+    Returns:
+        Number of rows written
+    """
+    n_rows, n_cols = sim_matrix_chunk.shape
+    
+    # Build coordinate arrays
+    row_indices = np.asarray(row_indices, dtype=np.uint32)
+    col_indices = np.asarray(col_indices, dtype=np.uint32)
+    
+    # For off-diagonal, all pairs are valid (col_idx > row_idx)
+    mol1_list = []
+    mol2_list = []
+    similarity_list = []
+    
+    for i, row_idx in enumerate(row_indices):
+        row_vals = sim_matrix_chunk[i, :]
+        col_vals = col_indices
+        
+        # Apply threshold filtering
+        if threshold is not None:
+            thresh_mask = row_vals >= threshold
+            row_vals = row_vals[thresh_mask]
+            col_vals = col_vals[thresh_mask]
+        
+        if len(row_vals) > 0:
+            mol1_list.extend([row_idx] * len(row_vals))
+            mol2_list.extend(col_vals.tolist())
+            similarity_list.extend(row_vals.tolist())
+    
+    if not mol1_list:
+        return 0
+    
+    # Create PyArrow table
+    table = pa.table({
+        "mol1_idx": pa.array(mol1_list, type=pa.uint32()),
+        "mol2_idx": pa.array(mol2_list, type=pa.uint32()),
+        similarity_column: pa.array(similarity_list, type=pa.float32()),
+    })
+    
+    parquet_writer.write_table(table)
+    
+    return len(mol1_list)
+
+
 def _compute_similarity_matrix_chunked_parquet(
     fps_tensor,
     indices: np.ndarray,
@@ -285,14 +364,14 @@ def _compute_similarity_matrix_chunked_parquet(
     n_mols = len(indices)
     total_written = 0
     
-    # Calculate chunk size based on memory
-    chunk_size = _calculate_chunk_size(n_mols, memory_usage_fraction)
+    # Calculate square chunk size based on memory (single similarity mode)
+    chunk_size = _calculate_square_chunk_size(n_mols, memory_usage_fraction, storage_mode="single")
+    n_row_blocks = math.ceil(n_mols / chunk_size)
     
     if log_path:
-        n_chunks = math.ceil(n_mols / chunk_size)
         _log_message_to_file(
-            f"Computing {similarity_metric} similarity matrix in {n_chunks} chunks "
-            f"(chunk_size={chunk_size}, n_mols={n_mols}, memory_fraction={memory_usage_fraction})...", 
+            f"Computing {similarity_metric} similarity matrix with square chunks "
+            f"(chunk_size={chunk_size}x{chunk_size}, n_mols={n_mols}, memory_fraction={memory_usage_fraction})...", 
             log_path
         )
         if threshold:
@@ -313,6 +392,7 @@ def _compute_similarity_matrix_chunked_parquet(
     parquet_path = Path(parquet_path)
     parquet_path.parent.mkdir(parents=True, exist_ok=True)
     
+    chunk_counter = 0
     with pq.ParquetWriter(
         str(parquet_path),
         schema,
@@ -320,42 +400,60 @@ def _compute_similarity_matrix_chunked_parquet(
         use_dictionary=["mol1_idx", "mol2_idx"],
     ) as writer:
         
-        # Process row chunks
+        # Process row blocks
         for row_start in range(0, n_mols, chunk_size):
             row_end = min(row_start + chunk_size, n_mols)
-            chunk_start_time = perf_counter()
             
-            # Get fingerprint chunk for rows - fps_tensor is now a torch.Tensor, subscriptable
-            row_fps_chunk = fps_tensor[row_start:row_end]
-            
-            # Compute similarity: chunk x all molecules
-            sim_chunk = similarity_func(row_fps_chunk, fps_tensor)
-            sim_chunk = np.asarray(sim_chunk, dtype=np.float32)
-            
-            # Write to parquet (lower triangular with threshold filtering)
-            rows_written = _write_similarity_chunk_to_parquet(
-                sim_chunk,
-                indices[row_start:row_end],
-                indices,
-                writer,
-                similarity_column=similarity_column,
-                threshold=threshold,
-            )
-            total_written += rows_written
-            
-            chunk_time = perf_counter() - chunk_start_time
-            if log_path:
-                _log_message_to_file(
-                    f"Chunk {row_start//chunk_size + 1}/{(n_mols-1)//chunk_size + 1}: "
-                    f"rows {row_start}-{row_end-1}, "
-                    f"wrote {rows_written} pairs, "
-                    f"took {chunk_time:.2f}s",
-                    log_path
-                )
-            
-            # Cleanup
-            del sim_chunk
-            gc.collect()
+            # For lower triangular, only process column blocks from row_start onwards
+            for col_start in range(row_start, n_mols, chunk_size):
+                col_end = min(col_start + chunk_size, n_mols)
+                chunk_counter += 1
+                chunk_start_time = perf_counter()
+                
+                # Get fingerprint chunks
+                row_fps_chunk = fps_tensor[row_start:row_end]
+                col_fps_chunk = fps_tensor[col_start:col_end]
+                
+                # Compute similarity: row_chunk x col_chunk (square submatrix)
+                sim_chunk = similarity_func(row_fps_chunk, col_fps_chunk)
+                sim_chunk = np.asarray(sim_chunk, dtype=np.float32)
+                
+                # For diagonal blocks (where row_start == col_start), we need lower triangular
+                # For off-diagonal blocks (col_start > row_start), we need all pairs
+                if col_start == row_start:
+                    # Diagonal block: apply lower triangular filtering
+                    rows_written = _write_similarity_chunk_to_parquet(
+                        sim_chunk,
+                        indices[row_start:row_end],
+                        indices[col_start:col_end],
+                        writer,
+                        similarity_column=similarity_column,
+                        threshold=threshold,
+                    )
+                else:
+                    # Off-diagonal block: all pairs are valid (col_idx > row_idx)
+                    rows_written = _write_similarity_chunk_to_parquet_offdiagonal(
+                        sim_chunk,
+                        indices[row_start:row_end],
+                        indices[col_start:col_end],
+                        writer,
+                        similarity_column=similarity_column,
+                        threshold=threshold,
+                    )
+                total_written += rows_written
+                
+                chunk_time = perf_counter() - chunk_start_time
+                if log_path:
+                    _log_message_to_file(
+                        f"Block {chunk_counter}: rows {row_start}-{row_end-1} x cols {col_start}-{col_end-1}, "
+                        f"wrote {rows_written} pairs, "
+                        f"took {chunk_time:.2f}s",
+                        log_path
+                    )
+                
+                # Cleanup
+                del sim_chunk
+                gc.collect()
     
     if log_path:
         _log_message_to_file(
@@ -393,14 +491,13 @@ def _compute_both_similarities_chunked_parquet(
     n_mols = len(indices)
     total_written = 0
     
-    # Calculate chunk size based on memory (need memory for both matrices simultaneously)
-    chunk_size = _calculate_chunk_size(n_mols, memory_usage_fraction / 2)
+    # Calculate square chunk size based on memory (need memory for both matrices simultaneously)
+    chunk_size = _calculate_square_chunk_size(n_mols, memory_usage_fraction / 2, storage_mode="both")
     
     if log_path:
-        n_chunks = math.ceil(n_mols / chunk_size)
         _log_message_to_file(
-            f"Computing BOTH tanimoto and cosine similarity matrices in {n_chunks} chunks "
-            f"(chunk_size={chunk_size}, n_mols={n_mols}, memory_fraction={memory_usage_fraction})...", 
+            f"Computing BOTH tanimoto and cosine similarity matrices with square chunks "
+            f"(chunk_size={chunk_size}x{chunk_size}, n_mols={n_mols}, memory_fraction={memory_usage_fraction})...", 
             log_path
         )
         if threshold:
@@ -418,6 +515,7 @@ def _compute_both_similarities_chunked_parquet(
     parquet_path = Path(parquet_path)
     parquet_path.parent.mkdir(parents=True, exist_ok=True)
     
+    chunk_counter = 0
     with pq.ParquetWriter(
         str(parquet_path),
         schema,
@@ -425,45 +523,63 @@ def _compute_both_similarities_chunked_parquet(
         use_dictionary=["mol1_idx", "mol2_idx"],
     ) as writer:
         
-        # Process row chunks
+        # Process row blocks
         for row_start in range(0, n_mols, chunk_size):
             row_end = min(row_start + chunk_size, n_mols)
-            chunk_start_time = perf_counter()
             
-            # Get fingerprint chunk for rows
-            row_fps_chunk = fps_tensor[row_start:row_end]
-            
-            # Compute both similarities: chunk x all molecules
-            tanimoto_chunk = crossTanimotoSimilarityMemoryConstrained(row_fps_chunk, fps_tensor)
-            tanimoto_chunk = np.asarray(tanimoto_chunk, dtype=np.float32)
-            
-            cosine_chunk = crossCosineSimilarityMemoryConstrained(row_fps_chunk, fps_tensor)
-            cosine_chunk = np.asarray(cosine_chunk, dtype=np.float32)
-            
-            # Write both to parquet
-            rows_written = _write_both_similarities_chunk_to_parquet(
-                tanimoto_chunk,
-                cosine_chunk,
-                indices[row_start:row_end],
-                indices,
-                writer,
-                threshold=threshold,
-            )
-            total_written += rows_written
-            
-            chunk_time = perf_counter() - chunk_start_time
-            if log_path:
-                _log_message_to_file(
-                    f"Chunk {row_start//chunk_size + 1}/{(n_mols-1)//chunk_size + 1}: "
-                    f"rows {row_start}-{row_end-1}, "
-                    f"wrote {rows_written} pairs, "
-                    f"took {chunk_time:.2f}s",
-                    log_path
-                )
-            
-            # Cleanup
-            del tanimoto_chunk, cosine_chunk
-            gc.collect()
+            # For lower triangular, only process column blocks from row_start onwards
+            for col_start in range(row_start, n_mols, chunk_size):
+                col_end = min(col_start + chunk_size, n_mols)
+                chunk_counter += 1
+                chunk_start_time = perf_counter()
+                
+                # Get fingerprint chunks
+                row_fps_chunk = fps_tensor[row_start:row_end]
+                col_fps_chunk = fps_tensor[col_start:col_end]
+                
+                # Compute both similarities: row_chunk x col_chunk (square submatrix)
+                tanimoto_chunk = crossTanimotoSimilarityMemoryConstrained(row_fps_chunk, col_fps_chunk)
+                tanimoto_chunk = np.asarray(tanimoto_chunk, dtype=np.float32)
+                
+                cosine_chunk = crossCosineSimilarityMemoryConstrained(row_fps_chunk, col_fps_chunk)
+                cosine_chunk = np.asarray(cosine_chunk, dtype=np.float32)
+                
+                # For diagonal blocks (where row_start == col_start), we need lower triangular
+                # For off-diagonal blocks (col_start > row_start), we need all pairs
+                if col_start == row_start:
+                    # Diagonal block: apply lower triangular filtering
+                    rows_written = _write_both_similarities_chunk_to_parquet(
+                        tanimoto_chunk,
+                        cosine_chunk,
+                        indices[row_start:row_end],
+                        indices[col_start:col_end],
+                        writer,
+                        threshold=threshold,
+                    )
+                else:
+                    # Off-diagonal block: all pairs are valid (col_idx > row_idx)
+                    rows_written = _write_both_similarities_chunk_to_parquet_offdiagonal(
+                        tanimoto_chunk,
+                        cosine_chunk,
+                        indices[row_start:row_end],
+                        indices[col_start:col_end],
+                        writer,
+                        threshold=threshold,
+                    )
+                total_written += rows_written
+                
+                chunk_time = perf_counter() - chunk_start_time
+                if log_path:
+                    _log_message_to_file(
+                        f"Block {chunk_counter}: rows {row_start}-{row_end-1} x cols {col_start}-{col_end-1}, "
+                        f"wrote {rows_written} pairs, "
+                        f"took {chunk_time:.2f}s",
+                        log_path
+                    )
+                
+                # Cleanup
+                del tanimoto_chunk, cosine_chunk
+                gc.collect()
     
     if log_path:
         _log_message_to_file(
@@ -516,6 +632,77 @@ def _write_both_similarities_chunk_to_parquet(
         tanimoto_vals = tanimoto_chunk[i, valid_mask]
         cosine_vals = cosine_chunk[i, valid_mask]
         col_vals = col_indices[valid_mask]
+        
+        # Apply threshold filtering (based on tanimoto)
+        if threshold is not None:
+            thresh_mask = tanimoto_vals >= threshold
+            tanimoto_vals = tanimoto_vals[thresh_mask]
+            cosine_vals = cosine_vals[thresh_mask]
+            col_vals = col_vals[thresh_mask]
+        
+        if len(tanimoto_vals) > 0:
+            mol1_list.extend([row_idx] * len(tanimoto_vals))
+            mol2_list.extend(col_vals.tolist())
+            tanimoto_list.extend(tanimoto_vals.tolist())
+            cosine_list.extend(cosine_vals.tolist())
+    
+    if not mol1_list:
+        return 0
+    
+    # Create PyArrow table
+    table = pa.table({
+        "mol1_idx": pa.array(mol1_list, type=pa.uint32()),
+        "mol2_idx": pa.array(mol2_list, type=pa.uint32()),
+        "tanimoto": pa.array(tanimoto_list, type=pa.float32()),
+        "cosine": pa.array(cosine_list, type=pa.float32()),
+    })
+    
+    parquet_writer.write_table(table)
+    
+    return len(mol1_list)
+
+
+def _write_both_similarities_chunk_to_parquet_offdiagonal(
+    tanimoto_chunk: np.ndarray,
+    cosine_chunk: np.ndarray,
+    row_indices: np.ndarray,
+    col_indices: np.ndarray,
+    parquet_writer: pq.ParquetWriter,
+    threshold: Optional[float] = None,
+) -> int:
+    """
+    Write an off-diagonal chunk of both similarity matrices to parquet.
+    
+    For off-diagonal blocks (col_start > row_start), all pairs are valid
+    since col_idx > row_idx always holds.
+    
+    Args:
+        tanimoto_chunk: Tanimoto similarity matrix chunk (n_rows x n_cols)
+        cosine_chunk: Cosine similarity matrix chunk (n_rows x n_cols)
+        row_indices: Row indices for this chunk
+        col_indices: Column indices for this chunk
+        parquet_writer: PyArrow ParquetWriter instance
+        threshold: Optional minimum similarity threshold (applied to tanimoto)
+        
+    Returns:
+        Number of rows written
+    """
+    n_rows, n_cols = tanimoto_chunk.shape
+    
+    # Build coordinate arrays
+    row_indices = np.asarray(row_indices, dtype=np.uint32)
+    col_indices = np.asarray(col_indices, dtype=np.uint32)
+    
+    # For off-diagonal, all pairs are valid (col_idx > row_idx)
+    mol1_list = []
+    mol2_list = []
+    tanimoto_list = []
+    cosine_list = []
+    
+    for i, row_idx in enumerate(row_indices):
+        tanimoto_vals = tanimoto_chunk[i, :]
+        cosine_vals = cosine_chunk[i, :]
+        col_vals = col_indices
         
         # Apply threshold filtering (based on tanimoto)
         if threshold is not None:
