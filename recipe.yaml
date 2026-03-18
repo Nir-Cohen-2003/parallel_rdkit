@@ -33,7 +33,7 @@ requirements:
         - librdkit-dev
         - nanobind
         # - boost
-        - libboost-devel
+        - libboost-devel == 1.86
         # - libboost-headers
         - scikit-build-core
         - cmake

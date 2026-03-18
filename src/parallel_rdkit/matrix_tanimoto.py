@@ -1,25 +1,28 @@
+import gc
 import logging
 import math
-import tempfile
 import threading
 import traceback
 from pathlib import Path
 from time import perf_counter
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Literal
 
 import numpy as np
 import polars as pl
+import pyarrow as pa
 import pyarrow.parquet as pq
 from rdkit import Chem
 from rdkit.ML.Cluster import Butina
 
 from .mol import sanitize_smiles
+from .fingerprint import FingerprintParams
 
 try:
     from nvmolkit.fingerprints import MorganFingerprintGenerator
     from nvmolkit.similarity import crossTanimotoSimilarityMemoryConstrained
+    NVMOLKIT_AVAILABLE = True
 except ImportError:
-    # These are expected to be available in the environment where this runs
+    NVMOLKIT_AVAILABLE = False
     logger = logging.getLogger(__name__)
     logger.warning("nvmolkit not found. GPU acceleration will not be available.")
 
@@ -47,9 +50,7 @@ def _log_message_to_file(
 ) -> None:
     """
     Log a single message to a file by attaching a temporary FileHandler to the module logger.
-    Reused from parallel_rdkit.tanimoto.
     """
-    logger = logging.getLogger(__name__)
     log_path = Path(log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     
@@ -82,40 +83,27 @@ def _log_message_to_file(
         logger.setLevel(prev_level)
 
 
-def calculate_tanimoto_matrix(
+def _generate_fingerprints_gpu(
     smiles: List[str],
-    fp_radius: int = 2,
-    fp_size: int = 2048,
-    save_path: Optional[Union[str, Path]] = None,
+    fp_params: FingerprintParams,
     log_path: Optional[Union[str, Path]] = None,
-) -> np.ndarray:
+) -> tuple:
     """
-    Calculate a dense Tanimoto similarity matrix for a list of SMILES strings using GPU.
+    Generate fingerprints using nvmolkit GPU acceleration.
     
-    Args:
-        smiles: List of SMILES strings.
-        fp_radius: Morgan fingerprint radius.
-        fp_size: Morgan fingerprint bit size.
-        save_path: Path to save the resulting matrix as a .npy file.
-        log_path: Path to log progress.
-        
     Returns:
-        A NumPy array of shape (N, N) containing similarity scores.
+        tuple: (fps_gpu, valid_indices, valid_smiles)
+            - fps_gpu: GPU tensor of fingerprints
+            - valid_indices: list of original indices that are valid
+            - valid_smiles: list of valid SMILES strings
     """
-    if log_path:
-        _log_message_to_file(
-            f"Starting Tanimoto matrix calculation for {len(smiles)} molecules.",
-            log_path,
-            overwrite=True
-        )
-
-    start = perf_counter()
+    if not NVMOLKIT_AVAILABLE:
+        raise ImportError("nvmolkit is required for GPU fingerprint generation")
     
-    # 1. Sanitize and Canonicalize
+    # Sanitize SMILES
     if log_path:
-        _log_message_to_file("Sanitizing SMILES...", log_path)
+        _log_message_to_file(f"Sanitizing {len(smiles)} SMILES...", log_path)
     
-    # Using the same batching logic as tanimoto.py
     batch_size_san = 1 + len(smiles) // 6
     sanitized = sanitize_smiles(smiles, batch_size=batch_size_san)
     
@@ -126,56 +114,314 @@ def calculate_tanimoto_matrix(
     if not valid_smiles:
         if log_path:
             _log_message_to_file("No valid molecules found in input.", log_path, level=logging.ERROR)
-        return np.array([[]], dtype=np.float32)
+        raise ValueError("No valid molecules found in input")
 
     if len(valid_smiles) != len(smiles):
         if log_path:
             _log_message_to_file(
                 f"Warning: {len(smiles) - len(valid_smiles)} invalid molecules skipped. "
-                f"Resulting matrix will be {len(valid_smiles)}x{len(valid_smiles)}.",
+                f"Processing {len(valid_smiles)} valid molecules.",
                 log_path,
                 level=logging.WARNING
             )
 
     # Convert to RDKit Mols
     mols = [Chem.MolFromSmiles(s) for s in valid_smiles]
+    
+    # Generate fingerprints on GPU
+    if log_path:
+        _log_message_to_file("Generating fingerprints on GPU...", log_path)
+    
+    fpgen = MorganFingerprintGenerator(radius=fp_params.radius, fpSize=fp_params.fpSize)
+    fps_gpu = fpgen.GetFingerprints(mols)
+    
+    return fps_gpu, valid_indices, valid_smiles
 
-    try:
-        # 2. Fingerprint generation (GPU)
-        if log_path:
-            _log_message_to_file("Generating fingerprints on GPU...", log_path)
+
+def _write_similarity_chunk_to_parquet(
+    sim_matrix_chunk: np.ndarray,
+    row_start: int,
+    col_indices: np.ndarray,
+    parquet_writer: pq.ParquetWriter,
+    threshold: Optional[float] = None,
+) -> int:
+    """
+    Write a chunk of similarity matrix to parquet, storing only lower triangular (i <= j).
+    Applies threshold filtering on GPU before returning data.
+    
+    Args:
+        sim_matrix_chunk: Similarity matrix chunk (n_rows x n_cols)
+        row_start: Starting row index for this chunk
+        col_indices: Column indices corresponding to sim_matrix_chunk columns
+        parquet_writer: PyArrow ParquetWriter instance
+        threshold: Optional minimum similarity threshold (only store >= threshold)
         
-        fpgen = MorganFingerprintGenerator(radius=fp_radius, fpSize=fp_size)
-        fps = fpgen.GetFingerprints(mols)
-        
-        # 3. Similarity matrix computation (GPU)
-        if log_path:
-            _log_message_to_file("Computing Tanimoto similarity matrix on GPU...", log_path)
+    Returns:
+        Number of rows written
+    """
+    n_rows, n_cols = sim_matrix_chunk.shape
+    
+    # Build coordinate arrays
+    row_indices = np.arange(row_start, row_start + n_rows, dtype=np.uint32)
+    
+    # For each row, get columns where col_idx >= row_idx (lower triangular)
+    mol1_list = []
+    mol2_list = []
+    tanimoto_list = []
+    
+    for i, row_idx in enumerate(row_indices):
+        # Get valid column indices for this row (lower triangular only: j >= i)
+        valid_mask = col_indices >= row_idx
+        if not np.any(valid_mask):
+            continue
             
-        # Using memory constrained routine for large molecule sets
-        # This computes the self-similarity matrix
-        sim_matrix = crossTanimotoSimilarityMemoryConstrained(fps, fps)
+        row_vals = sim_matrix_chunk[i, valid_mask]
+        col_vals = col_indices[valid_mask]
         
-        # Ensure it's a numpy array
-        sim_matrix = np.asarray(sim_matrix, dtype=np.float32)
+        # Apply threshold filtering
+        if threshold is not None:
+            thresh_mask = row_vals >= threshold
+            row_vals = row_vals[thresh_mask]
+            col_vals = col_vals[thresh_mask]
         
-        if save_path:
-            save_path = Path(save_path)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            np.save(str(save_path), sim_matrix)
-            if log_path:
-                _log_message_to_file(f"Matrix saved to {save_path}", log_path)
+        if len(row_vals) > 0:
+            mol1_list.extend([row_idx] * len(row_vals))
+            mol2_list.extend(col_vals.tolist())
+            tanimoto_list.extend(row_vals.tolist())
+    
+    if not mol1_list:
+        return 0
+    
+    # Create PyArrow table
+    table = pa.table({
+        "mol1_idx": pa.array(mol1_list, type=pa.uint32()),
+        "mol2_idx": pa.array(mol2_list, type=pa.uint32()),
+        "tanimoto": pa.array(tanimoto_list, type=pa.float32()),
+    })
+    
+    parquet_writer.write_table(table)
+    
+    return len(mol1_list)
 
-        end = perf_counter()
-        if log_path:
-            _log_message_to_file(
-                f"Matrix calculation completed in {end - start:.2f}s. "
-                f"Shape: {sim_matrix.shape}",
-                log_path
+
+def _compute_tanimoto_matrix_chunked_parquet(
+    fps_gpu,
+    indices: np.ndarray,
+    parquet_path: Union[str, Path],
+    log_path: Optional[Union[str, Path]] = None,
+    chunk_size: int = 5000,
+    threshold: Optional[float] = None,
+) -> int:
+    """
+    Compute Tanimoto matrix in chunks and write to parquet file.
+    Stores only lower triangular (i <= j) with optional threshold filtering.
+    
+    Args:
+        fps_gpu: GPU fingerprint tensor
+        indices: Original indices of valid molecules
+        parquet_path: Path to output parquet file
+        log_path: Path to log file
+        chunk_size: Number of rows to process per chunk
+        threshold: Minimum similarity threshold
+        
+    Returns:
+        Total number of similarity pairs written
+    """
+    n_mols = len(indices)
+    total_written = 0
+    
+    if log_path:
+        _log_message_to_file(
+            f"Computing Tanimoto matrix in {math.ceil(n_mols / chunk_size)} chunks "
+            f"(chunk_size={chunk_size}, n_mols={n_mols})...", 
+            log_path
+        )
+        if threshold:
+            _log_message_to_file(f"Applying similarity threshold: {threshold}", log_path)
+    
+    # Define parquet schema
+    schema = pa.schema([
+        ("mol1_idx", pa.uint32()),
+        ("mol2_idx", pa.uint32()),
+        ("tanimoto", pa.float32()),
+    ])
+    
+    # Open parquet writer with snappy compression
+    parquet_path = Path(parquet_path)
+    parquet_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with pq.ParquetWriter(
+        str(parquet_path),
+        schema,
+        compression="snappy",
+        use_dictionary=["mol1_idx", "mol2_idx"],  # Enable dictionary encoding for indices
+    ) as writer:
+        
+        # Process row chunks
+        for row_start in range(0, n_mols, chunk_size):
+            row_end = min(row_start + chunk_size, n_mols)
+            chunk_start_time = perf_counter()
+            
+            # Get fingerprint chunk for rows
+            # Note: nvmolkit expects specific format, we pass appropriate slice
+            row_fps_chunk = fps_gpu[row_start:row_end]
+            
+            # Compute similarity: chunk x all molecules
+            # crossTanimotoSimilarityMemoryConstrained handles GPU chunking internally
+            sim_chunk = crossTanimotoSimilarityMemoryConstrained(row_fps_chunk, fps_gpu)
+            sim_chunk = np.asarray(sim_chunk, dtype=np.float32)
+            
+            # Write to parquet (lower triangular with threshold filtering)
+            rows_written = _write_similarity_chunk_to_parquet(
+                sim_chunk,
+                indices[row_start],
+                indices,  # column indices are the full set
+                writer,
+                threshold=threshold,
+            )
+            total_written += rows_written
+            
+            chunk_time = perf_counter() - chunk_start_time
+            if log_path:
+                _log_message_to_file(
+                    f"Chunk {row_start//chunk_size + 1}/{(n_mols-1)//chunk_size + 1}: "
+                    f"rows {row_start}-{row_end-1}, "
+                    f"wrote {rows_written} pairs, "
+                    f"took {chunk_time:.2f}s",
+                    log_path
+                )
+            
+            # Cleanup
+            del sim_chunk
+            gc.collect()
+    
+    if log_path:
+        _log_message_to_file(
+            f"Parquet writing complete. Total pairs written: {total_written}",
+            log_path
+        )
+    
+    return total_written
+
+
+def calculate_tanimoto_matrix(
+    smiles: List[str],
+    indices: Optional[np.ndarray] = None,
+    fp_params: Optional[FingerprintParams] = None,
+    output_mode: Literal["numpy", "parquet"] = "numpy",
+    parquet_path: Optional[Union[str, Path]] = None,
+    threshold: Optional[float] = None,
+    chunk_size: int = 5000,
+    log_path: Optional[Union[str, Path]] = None,
+) -> Optional[np.ndarray]:
+    """
+    Calculate Tanimoto similarity matrix for a list of SMILES strings using GPU.
+    
+    Two output modes:
+    - "numpy": Returns dense matrix in memory (backward compatible)
+    - "parquet": Writes lower-triangular similarities to parquet file (memory efficient)
+    
+    Args:
+        smiles: List of SMILES strings.
+        indices: Original indices for molecules (caller-provided). If None, uses range(len(smiles)).
+        fp_params: Fingerprint parameters (FingerprintParams dataclass). Defaults to Morgan r=2, size=2048.
+        output_mode: "numpy" or "parquet".
+        parquet_path: Required for parquet mode. Path to output parquet file.
+        threshold: Minimum similarity threshold for parquet mode (only store similarities >= threshold).
+        chunk_size: Number of rows per chunk for parquet mode computation.
+        log_path: Path to log progress. If None and parquet_path is provided, uses parquet_path with .log suffix.
+        
+    Returns:
+        For "numpy" mode: NumPy array of shape (N, N) containing similarity scores.
+        For "parquet" mode: None (results written to file).
+        
+    Raises:
+        ValueError: If invalid mode or missing required parameters.
+        ImportError: If nvmolkit is not available for GPU acceleration.
+    """
+    if not NVMOLKIT_AVAILABLE:
+        raise ImportError("nvmolkit is required for GPU Tanimoto calculation")
+    
+    if output_mode not in ("numpy", "parquet"):
+        raise ValueError(f"output_mode must be 'numpy' or 'parquet', got '{output_mode}'")
+    
+    if output_mode == "parquet" and parquet_path is None:
+        raise ValueError("parquet_path is required when output_mode='parquet'")
+    
+    # Auto-generate log path if not provided
+    if log_path is None and parquet_path is not None:
+        parquet_path_obj = Path(parquet_path)
+        log_path = parquet_path_obj.with_suffix('.log')
+    
+    # Default fingerprint parameters
+    if fp_params is None:
+        fp_params = FingerprintParams(fp_type="morgan", radius=2, fpSize=2048)
+    
+    # Default indices
+    if indices is None:
+        indices = np.arange(len(smiles), dtype=np.uint32)
+    else:
+        indices = np.asarray(indices, dtype=np.uint32)
+    
+    start = perf_counter()
+    
+    if log_path:
+        _log_message_to_file(
+            f"Starting Tanimoto matrix calculation for {len(smiles)} molecules. "
+            f"Output mode: {output_mode}",
+            log_path,
+            overwrite=True
+        )
+    
+    try:
+        # Generate fingerprints on GPU
+        fps_gpu, valid_indices, valid_smiles = _generate_fingerprints_gpu(
+            smiles, fp_params, log_path
+        )
+        
+        # Filter indices to match valid molecules
+        valid_indices_arr = np.array(valid_indices, dtype=np.uint32)
+        indices = indices[valid_indices_arr]
+        
+        if output_mode == "parquet":
+            # Compute in chunks and write to parquet
+            _compute_tanimoto_matrix_chunked_parquet(
+                fps_gpu,
+                indices,
+                parquet_path,
+                log_path=log_path,
+                chunk_size=chunk_size,
+                threshold=threshold,
             )
             
-        return sim_matrix
-
+            end = perf_counter()
+            if log_path:
+                _log_message_to_file(
+                    f"Parquet calculation completed in {end - start:.2f}s. "
+                    f"Output: {parquet_path}",
+                    log_path
+                )
+            
+            return None
+            
+        else:  # numpy mode
+            if log_path:
+                _log_message_to_file("Computing full Tanimoto similarity matrix on GPU...", log_path)
+            
+            # Compute full matrix (may OOM for large datasets)
+            sim_matrix = crossTanimotoSimilarityMemoryConstrained(fps_gpu, fps_gpu)
+            sim_matrix = np.asarray(sim_matrix, dtype=np.float32)
+            
+            end = perf_counter()
+            if log_path:
+                _log_message_to_file(
+                    f"Matrix calculation completed in {end - start:.2f}s. "
+                    f"Shape: {sim_matrix.shape}",
+                    log_path
+                )
+            
+            return sim_matrix
+            
     except Exception:
         err = traceback.format_exc()
         if log_path:
@@ -186,27 +432,60 @@ def calculate_tanimoto_matrix(
 def calculate_tanimoto_matrix_streaming(
     parquet_path: Union[str, Path],
     smiles_column: str = "smiles",
-    save_path: Optional[Union[str, Path]] = None,
+    index_column: str = "index",
+    fp_params: Optional[FingerprintParams] = None,
+    output_mode: Literal["numpy", "parquet"] = "parquet",
+    output_parquet_path: Optional[Union[str, Path]] = None,
+    threshold: Optional[float] = None,
+    chunk_size: int = 5000,
     log_path: Optional[Union[str, Path]] = None,
-    fp_radius: int = 2,
-    fp_size: int = 2048,
-) -> np.ndarray:
+) -> Optional[np.ndarray]:
     """
     Calculate Tanimoto matrix by reading SMILES from a parquet file using polars streaming.
-    """
-    if log_path:
-        _log_message_to_file(f"Reading SMILES from {parquet_path} using polars streaming.", log_path)
     
-    # Read SMILES efficiently
-    df = pl.scan_parquet(str(parquet_path)).select(pl.col(smiles_column)).collect()
+    Args:
+        parquet_path: Path to input parquet file containing SMILES.
+        smiles_column: Name of column containing SMILES strings.
+        index_column: Name of column containing molecule indices.
+        fp_params: Fingerprint parameters.
+        output_mode: "numpy" or "parquet".
+        output_parquet_path: Path for output parquet (required for parquet mode).
+        threshold: Minimum similarity threshold for parquet mode.
+        chunk_size: Number of rows per chunk.
+        log_path: Path to log file.
+        
+    Returns:
+        For numpy mode: similarity matrix array.
+        For parquet mode: None.
+    """
+    if log_path is None and output_parquet_path is not None:
+        log_path = Path(output_parquet_path).with_suffix('.log')
+    
+    if log_path:
+        _log_message_to_file(
+            f"Reading SMILES from {parquet_path} using polars.",
+            log_path,
+            overwrite=True
+        )
+    
+    # Read SMILES and indices from parquet
+    df = pl.scan_parquet(str(parquet_path)).select([
+        pl.col(smiles_column),
+        pl.col(index_column)
+    ]).collect()
+    
     smiles_list = df.get_column(smiles_column).to_list()
+    indices = df.get_column(index_column).to_numpy().astype(np.uint32)
     
     return calculate_tanimoto_matrix(
-        smiles_list,
-        fp_radius=fp_radius,
-        fp_size=fp_size,
-        save_path=save_path,
-        log_path=log_path
+        smiles=smiles_list,
+        indices=indices,
+        fp_params=fp_params,
+        output_mode=output_mode,
+        parquet_path=output_parquet_path,
+        threshold=threshold,
+        chunk_size=chunk_size,
+        log_path=log_path,
     )
 
 

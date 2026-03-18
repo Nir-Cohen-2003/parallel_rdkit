@@ -7,3 +7,4 @@ pixi.lock
 build/
 dist/
 .pytest_cache
+data/

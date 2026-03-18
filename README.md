@@ -117,23 +117,83 @@ Screen molecules from a SMILES file against a list of SMARTS patterns.
 
 ### Module: `parallel_rdkit.matrix_tanimoto`
 
-#### `calculate_tanimoto_matrix(smiles: List[str], fp_radius: int = 2, fp_size: int = 2048, save_path: Optional[Union[str, Path]] = None, log_path: Optional[Union[str, Path]] = None) -> np.ndarray`
+#### `calculate_tanimoto_matrix(smiles: List[str], indices: Optional[np.ndarray] = None, fp_params: Optional[FingerprintParams] = None, output_mode: Literal["numpy", "parquet"] = "numpy", parquet_path: Optional[Union[str, Path]] = None, threshold: Optional[float] = None, chunk_size: int = 5000, log_path: Optional[Union[str, Path]] = None) -> Optional[np.ndarray]`
 
-Calculate a dense Tanimoto similarity matrix for a list of SMILES strings using GPU.
+Calculate Tanimoto similarity matrix for a list of SMILES strings using GPU acceleration via nvmolkit.
+
+Supports two output modes:
+- **"numpy"**: Returns dense matrix in memory (may OOM for large datasets)
+- **"parquet"**: Streams results to disk in chunks, memory-efficient for large datasets
+
+**How the Calculation Works:**
+1. **Fingerprint Generation**: Uses nvmolkit's GPU-accelerated Morgan fingerprint generator
+2. **Similarity Computation**: For parquet mode, computes the matrix in row chunks (default 5,000 rows at a time)
+3. **Lower Triangular Storage**: Only stores pairs where `mol1_idx <= mol2_idx` to avoid redundancy
+4. **Threshold Filtering**: Applied on GPU before transferring to CPU (optional, parquet mode only)
+5. **Chunked Writing**: Appends results incrementally to parquet file using PyArrow
 
 Args:
     smiles: List of SMILES strings.
-    fp_radius: Morgan fingerprint radius.
-    fp_size: Morgan fingerprint bit size.
-    save_path: Path to save the resulting matrix as a .npy file.
-    log_path: Path to log progress.
+    indices: Original molecule indices from the caller. If None, uses `range(len(smiles))`. Invalid SMILES are filtered out and their indices are removed from output.
+    fp_params: Fingerprint parameters as `FingerprintParams` dataclass. Defaults to Morgan fingerprints with radius=2, fpSize=2048.
+    output_mode: Either "numpy" (return dense array) or "parquet" (write to file).
+    parquet_path: Required for parquet mode. Path to output parquet file. Log file will be auto-generated with `.log` suffix.
+    threshold: Minimum similarity threshold (parquet mode only). Only similarities >= threshold are stored.
+    chunk_size: Number of rows to process per chunk in parquet mode. Controls memory usage.
+    log_path: Path to log progress. If None and parquet_path is provided, uses `{parquet_path}.log`.
     
 Returns:
-    A NumPy array of shape (N, N) containing similarity scores.
+    For "numpy" mode: NumPy array of shape (N, N) containing similarity scores.
+    For "parquet" mode: None (results written to `parquet_path`).
 
-#### `calculate_tanimoto_matrix_streaming(parquet_path: Union[str, Path], smiles_column: str = 'smiles', save_path: Optional[Union[str, Path]] = None, log_path: Optional[Union[str, Path]] = None, fp_radius: int = 2, fp_size: int = 2048) -> np.ndarray`
+**Parquet Output Format:**
+Three columns: `mol1_idx` (uint32), `mol2_idx` (uint32), `tanimoto` (float32)
+- Only lower triangular pairs stored (mol1_idx <= mol2_idx)
+- Snappy compression enabled
+- Dictionary encoding for index columns
 
-Calculate Tanimoto matrix by reading SMILES from a parquet file using polars streaming.
+**Example:**
+```python
+from parallel_rdkit.matrix_tanimoto import calculate_tanimoto_matrix
+from parallel_rdkit.fingerprint import FingerprintParams
+import numpy as np
+
+smiles = ["CCO", "CCCO", "CCCCO"]
+indices = np.array([100, 200, 300], dtype=np.uint32)
+
+# Parquet mode with threshold filtering
+calculate_tanimoto_matrix(
+    smiles=smiles,
+    indices=indices,
+    fp_params=FingerprintParams(fp_type="morgan", radius=2, fpSize=2048),
+    output_mode="parquet",
+    parquet_path="/path/to/output.parquet",
+    threshold=0.5,  # Only store similarities >= 0.5
+    chunk_size=5000
+)
+# Creates: output.parquet and output.parquet.log
+```
+
+#### `calculate_tanimoto_matrix_streaming(parquet_path: Union[str, Path], smiles_column: str = "smiles", index_column: str = "index", fp_params: Optional[FingerprintParams] = None, output_mode: Literal["numpy", "parquet"] = "parquet", output_parquet_path: Optional[Union[str, Path]] = None, threshold: Optional[float] = None, chunk_size: int = 5000, log_path: Optional[Union[str, Path]] = None) -> Optional[np.ndarray]`
+
+Calculate Tanimoto matrix by reading SMILES from a parquet file using polars.
+
+Reads SMILES and their corresponding indices from an input parquet file, then computes similarities using `calculate_tanimoto_matrix()`.
+
+Args:
+    parquet_path: Path to input parquet file containing SMILES and indices.
+    smiles_column: Name of column containing SMILES strings (default: "smiles").
+    index_column: Name of column containing molecule indices (default: "index").
+    fp_params: Fingerprint parameters as `FingerprintParams` dataclass.
+    output_mode: Either "numpy" or "parquet".
+    output_parquet_path: Path for output parquet file (required for parquet mode).
+    threshold: Minimum similarity threshold for parquet mode.
+    chunk_size: Number of rows per chunk.
+    log_path: Path to log file. Auto-generated from output_parquet_path if not provided.
+    
+Returns:
+    For numpy mode: similarity matrix array.
+    For parquet mode: None (results written to file).
 
 #### `butina_split(sim_matrix: np.ndarray, dist_threshold: float = 0.3) -> List[int]`
 
