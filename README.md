@@ -265,6 +265,99 @@ Args:
 Returns:
     List of sanitized SMILES strings.
 
+### Module: `parallel_rdkit.stoned`
+
+**Dependencies Required:**
+- `selfies` - SELFIES molecular string representation
+
+Install separately: `pip install selfies`
+
+The `parallel_rdkit.stoned` module implements the STONED (Selfies TO NEw molecules with Decoding) algorithm with C++ parallel acceleration for the RDKit-heavy steps (SMILES randomization, sanitization, and fingerprint scoring). The SELFIES token manipulation remains in Python, as the `selfies` library is Python-only.
+
+#### `generate_local_space(smiles: str, num_random_samples: int = 1000, num_mutation_ls: List[int] = None, fp_params: Optional[FingerprintParams] = None, return_scores: bool = False) -> Union[List[str], Tuple[List[str], List[float]]]`
+
+Generate a local chemical space around a single starting SMILES using randomized SMILES orderings, SELFIES encoding, and token mutations.
+
+**Accelerated steps (C++ OpenMP):**
+- SMILES randomization (`randomize_smiles_parallel`)
+- Sanitization (`sanitize_smiles_parallel`)
+- Fingerprint scoring (`tanimoto_scores_parallel`) when `return_scores=True`
+
+Args:
+    smiles: Starting SMILES string.
+    num_random_samples: Number of randomized SMILES orderings (default: 1000).
+    num_mutation_ls: List of mutation depths to apply (default: [1, 2, 3, 4, 5]).
+    fp_params: Fingerprint parameters for scoring. Required if `return_scores=True`.
+    return_scores: If True, returns `(smiles_list, scores_list)`.
+
+Returns:
+    List of unique generated SMILES, or tuple of (SMILES, scores) if `return_scores=True`.
+
+**Example:**
+```python
+from parallel_rdkit.stoned import generate_local_space
+from parallel_rdkit.fingerprint import FingerprintParams
+
+smiles, scores = generate_local_space(
+    smiles="CCO",
+    num_random_samples=500,
+    num_mutation_ls=[1, 2, 3],
+    fp_params=FingerprintParams(fp_type="morgan", radius=2, fpSize=2048),
+    return_scores=True,
+)
+print(f"Generated {len(smiles)} unique molecules")
+```
+
+#### `generate_pair_paths(smiles_list: List[str], num_tries: int = 2, num_random_samples: int = 2, collect_bidirectional: bool = True) -> List[str]`
+
+Generate chemical paths between exactly 2 SMILES by greedily flipping differing SELFIES tokens.
+
+Args:
+    smiles_list: Exactly 2 SMILES strings.
+    num_tries: Path attempts per randomized pair (default: 2).
+    num_random_samples: Random orderings per endpoint (default: 2).
+    collect_bidirectional: Also generate paths in the reverse direction (default: True).
+
+Returns:
+    List of unique SMILES strings along all paths.
+
+#### `generate_triplet_paths(smiles_list: List[str], num_paths: int = 100, num_random_samples: int = 1) -> List[str]`
+
+Generate median molecules / generalized paths from all combinations of 3 SMILES.
+
+Args:
+    smiles_list: At least 3 SMILES strings.
+    num_paths: Number of paths to attempt per triplet (default: 100).
+    num_random_samples: Random orderings per molecule (default: 1).
+
+Returns:
+    List of unique median/path SMILES strings.
+
+#### `get_random_smiles(smi: str, num_random_samples: int) -> List[str]`
+
+Obtain random SMILES orderings of a single SMILES using the C++ parallel backend.
+
+Args:
+    smi: Input SMILES string.
+    num_random_samples: Number of randomized variants to generate.
+
+Returns:
+    List of unique randomized SMILES strings.
+
+#### `tanimoto_scores_parallel(smiles: List[str], target_smi: str, fp_params: FingerprintParams) -> List[float]`
+
+**Low-level C++ backend.** Compute Tanimoto similarity scores between a list of SMILES and a target SMILES in parallel using OpenMP.
+
+This is automatically used by `generate_local_space` when `return_scores=True`, but can be called directly for custom workflows.
+
+Args:
+    smiles: Query SMILES strings.
+    target_smi: Target SMILES string.
+    fp_params: Fingerprint parameters.
+
+Returns:
+    List of Tanimoto scores (0.0 for invalid molecules).
+
 ## Benchmarking
 
 ### Large-Scale Similarity Matrix Calculation

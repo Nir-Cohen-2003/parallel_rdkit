@@ -10,6 +10,22 @@ from .screen_smarts import (
     screen_smarts,
 )
 
+# Import STONED generation functions (requires selfies)
+try:
+    from .stoned import (
+        generate_local_space,
+        generate_pair_paths,
+        generate_triplet_paths,
+        get_random_smiles,
+        mutate_selfie,
+        get_mutated_SELFIES,
+        obtain_path,
+        form_joint_path,
+    )
+    _STONED_AVAILABLE = True
+except ImportError:
+    _STONED_AVAILABLE = False
+
 # Import similarity matrix functions (GPU-accelerated, requires nvmolkit)
 try:
     from .matrix_similarity import (
@@ -46,6 +62,14 @@ __all__ = [
     "calculate_cosine_matrix_streaming",
     "butina_split",
     "umap_split",
+    "generate_local_space",
+    "generate_pair_paths",
+    "generate_triplet_paths",
+    "get_random_smiles",
+    "mutate_selfie",
+    "get_mutated_SELFIES",
+    "obtain_path",
+    "form_joint_path",
 ]
 
 

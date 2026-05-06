@@ -4,6 +4,7 @@
 #include <nanobind/stl/tuple.h>
 #include "mol.hpp"
 #include "screen_smarts.hpp"
+#include "stoned.hpp"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -77,4 +78,15 @@ NB_MODULE(parallel_rdkit_backend, m) {
           "smiles_file"_a, "smarts_list"_a, "batch_size"_a, "cache_path"_a, "output_path"_a,
           nb::call_guard<nb::gil_scoped_release>(),
           "Screen molecules against SMARTS patterns (streaming mode). Writes to output_path.npy, returns molecule count.");
+
+    // STONED bindings
+    m.def("randomize_smiles_parallel", &parallel_rdkit::randomize_smiles_parallel,
+          "smiles"_a, "num_samples"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
+          "Generate randomized SMILES orderings in parallel. Returns a flattened list of length smiles.size() * num_samples.");
+
+    m.def("tanimoto_scores_parallel", &parallel_rdkit::tanimoto_scores_parallel,
+          "smiles"_a, "target_smi"_a, "opts"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
+          "Compute Tanimoto similarity scores between a list of SMILES and a target SMILES in parallel.");
 }

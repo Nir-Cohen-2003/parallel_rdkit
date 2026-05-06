@@ -18,6 +18,7 @@ test = { depends-on = ["test-fingerprint", "test-parallel"] }
 test-full = { depends-on = ["test", "test-msready"] }
 test-fingerprint = "pytest tests/test_fingerprint.py"
 test-parallel = "pytest tests/test_parallel.py"
+test-stoned = "pytest tests/test_stoned.py"
 test-msready = "pytest tests/test_msready_full.py -D data/DSSTox.csv"
 benchmark-msready = "python benchmarks/benchmark_msready.py"
 
@@ -30,6 +31,7 @@ pyarrow = "*"
 tqdm = "*"
 rdkit = "*"
 psutil = "*"
+selfies = "*"
 
 
 [feature.gpu.tasks]
