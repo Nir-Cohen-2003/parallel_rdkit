@@ -7,8 +7,7 @@ with C++ parallel acceleration for the compute-intensive steps:
 - Batch sanitization (C++ OpenMP)
 - Fingerprint scoring (C++ OpenMP)
 
-The SELFIES string manipulation remains in Python, as the selfies library
-is Python-only.
+The SELFIES encode/decode uses selfies_rs (Rust) for performance.
 """
 
 import itertools
@@ -20,10 +19,14 @@ from rdkit.Chem import MolFromSmiles as smi2mol
 from rdkit.Chem import MolToSmiles as mol2smi
 
 try:
-    import selfies
+    import selfies_rs as selfies
     _SELFIES_AVAILABLE = True
 except ImportError:
-    _SELFIES_AVAILABLE = False
+    try:
+        import selfies
+        _SELFIES_AVAILABLE = True
+    except ImportError:
+        _SELFIES_AVAILABLE = False
 
 from .parallel_rdkit_backend import (
     randomize_smiles_parallel as _randomize_smiles_parallel,
@@ -36,8 +39,8 @@ from .fingerprint import FingerprintParams
 def _require_selfies():
     if not _SELFIES_AVAILABLE:
         raise ImportError(
-            "The 'selfies' package is required for STONED generation. "
-            "Install it with: pip install selfies"
+            "The 'selfies_rs' (or 'selfies') package is required for STONED generation. "
+            "Install it with: pip install selfies_rs"
         )
 
 
@@ -138,7 +141,7 @@ def generate_local_space(
     Generate a local chemical space around a single SMILES using STONED.
 
     Uses C++ parallel backends for SMILES randomization, sanitization,
-    and optional fingerprint scoring.
+    and optional fingerprint scoring. Uses selfies_rs for encode/decode.
 
     Parameters
     ----------
@@ -172,14 +175,21 @@ def generate_local_space(
     raw_randomized = _randomize_smiles_parallel([smiles], num_random_samples)
     randomized_smile_orderings = list(set([s for s in raw_randomized if s]))
 
-    # Convert to SELFIES
-    selfies_ls = [selfies.encoder(x) for x in randomized_smile_orderings]
+    # Convert to SELFIES using batch encoder (selfies_rs)
+    if hasattr(selfies, 'encoder_batch'):
+        selfies_ls = selfies.encoder_batch(randomized_smile_orderings)
+    else:
+        selfies_ls = [selfies.encoder(x) for x in randomized_smile_orderings]
 
     # Mutate and decode (Python loop - SELFIES manipulation)
     all_smiles = []
     for num_mutations in num_mutation_ls:
         selfies_mut = get_mutated_SELFIES(selfies_ls.copy(), num_mutations=num_mutations)
-        smiles_back = [selfies.decoder(x) for x in selfies_mut]
+        # Batch decode (selfies_rs)
+        if hasattr(selfies, 'decoder_batch'):
+            smiles_back = selfies.decoder_batch(selfies_mut)
+        else:
+            smiles_back = [selfies.decoder(x) for x in selfies_mut]
         all_smiles.extend(smiles_back)
 
     # Use C++ parallel backend for sanitization and deduplication
