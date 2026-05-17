@@ -115,7 +115,7 @@ std::vector<std::vector<uint8_t>> process_batch(
     std::vector<ExplicitBitVect*> computed_fps(N, nullptr);
     
     #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < N; ++i) {
+    for (long i = 0; i < static_cast<long>(N); ++i) {
         SmilesParserParams params;
         params.sanitize = false;
         std::unique_ptr<ROMol> mol(SmilesToMol(smiles_batch[i], params));
