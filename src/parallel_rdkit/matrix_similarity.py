@@ -32,8 +32,6 @@ try:
     NVMOLKIT_AVAILABLE = True
 except ImportError:
     NVMOLKIT_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("nvmolkit not found. GPU acceleration will not be available.")
 
 # Optional dependencies for UMAP split
 try:
@@ -107,6 +105,7 @@ def _generate_fingerprints_gpu(
             - valid_smiles: list of valid SMILES strings
     """
     if not NVMOLKIT_AVAILABLE:
+        logger.warning("nvmolkit not found. GPU acceleration will not be available.")
         raise ImportError("nvmolkit is required for GPU fingerprint generation")
     
     # Sanitize SMILES
@@ -763,6 +762,7 @@ def calculate_similarity_matrix(
         ImportError: If nvmolkit is not available for GPU acceleration.
     """
     if not NVMOLKIT_AVAILABLE:
+        logger.warning("nvmolkit not found. GPU acceleration will not be available.")
         raise ImportError("nvmolkit is required for GPU similarity calculation")
     
     if similarity_metric not in ("tanimoto", "cosine", "both"):
