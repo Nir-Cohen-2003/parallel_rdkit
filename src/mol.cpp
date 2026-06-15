@@ -37,7 +37,9 @@ bool has_carbon(const ROMol& mol) {
     return false;
 }
 
-std::string msready_smiles(const std::string& smiles) {
+namespace {
+
+std::string msready_smiles_impl(const std::string& smiles) {
     std::unique_ptr<RWMol> mol;
     try {
         mol.reset(SmilesToMol(smiles));
@@ -80,6 +82,16 @@ std::string msready_smiles(const std::string& smiles) {
     }
 }
 
+} // unnamed namespace
+
+std::string msready_smiles(const std::string& smiles, bool silent) {
+    std::unique_ptr<RDLog::LogStateSetter> log_silencer;
+    if (silent) {
+        log_silencer.reset(new RDLog::LogStateSetter());
+    }
+    return msready_smiles_impl(smiles);
+}
+
 template <typename Func, typename R = std::invoke_result_t<Func, std::string>>
 std::vector<R> process_parallel(const std::vector<std::string>& inputs, Func func) {
     long n = inputs.size();
@@ -100,8 +112,12 @@ std::vector<R> process_parallel(const std::vector<std::string>& inputs, Func fun
     return results;
 }
 
-std::vector<std::string> msready_smiles_parallel(const std::vector<std::string>& smiles) {
-    return process_parallel(smiles, msready_smiles);
+std::vector<std::string> msready_smiles_parallel(const std::vector<std::string>& smiles, bool silent) {
+    std::unique_ptr<RDLog::LogStateSetter> log_silencer;
+    if (silent) {
+        log_silencer.reset(new RDLog::LogStateSetter());
+    }
+    return process_parallel(smiles, msready_smiles_impl);
 }
 
 std::vector<std::string> sanitize_smiles_parallel(const std::vector<std::string>& smiles) {
@@ -179,7 +195,12 @@ std::vector<std::string> smiles_to_inchikey_parallel(const std::vector<std::stri
     return results;
 }
 
-std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::string>> msready_inchi_inchikey_parallel(const std::vector<std::string>& smiles) {
+std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::string>> msready_inchi_inchikey_parallel(const std::vector<std::string>& smiles, bool silent) {
+    std::unique_ptr<RDLog::LogStateSetter> log_silencer;
+    if (silent) {
+        log_silencer.reset(new RDLog::LogStateSetter());
+    }
+
     long n = smiles.size();
     std::vector<std::string> msready_vec(n);
     std::vector<std::string> inchi_vec(n);

@@ -103,24 +103,25 @@ def _smiles_to_inchikey_worker(chunk: List[str]) -> List[str]:
     return _smiles_to_inchikey_parallel(chunk)
 
 
-def _msready_inchi_inchikey_worker(chunk: List[str]) -> Tuple[List[str], List[str], List[str]]:
+def _msready_inchi_inchikey_worker(args: Tuple[List[str], bool]) -> Tuple[List[str], List[str], List[str]]:
     """Worker function for MS-Ready + InChI + InChIKey conversion."""
+    chunk, silent = args
     from .parallel_rdkit_backend import msready_inchi_inchikey_parallel as _msready_inchi_inchikey_parallel
-    return _msready_inchi_inchikey_parallel(chunk)
+    return _msready_inchi_inchikey_parallel(chunk, silent)
 
 
-def msready_smiles(smiles: str) -> str:
+def msready_smiles(smiles: str, *, silent: bool = True) -> str:
     """Transforms a SMILES string into an MS-Ready SMILES string."""
     from .parallel_rdkit_backend import msready_smiles as _msready_smiles
-    return _msready_smiles(smiles)
+    return _msready_smiles(smiles, silent)
 
 
-def msready_smiles_parallel(smiles: Iterable[str]) -> List[str]:
+def msready_smiles_parallel(smiles: Iterable[str], *, silent: bool = True) -> List[str]:
     """Parallel MS-Ready transformation of SMILES."""
     from .parallel_rdkit_backend import msready_smiles_parallel as _msready_smiles_parallel
     if not isinstance(smiles, list):
         smiles = list(smiles)
-    return _msready_smiles_parallel(smiles)
+    return _msready_smiles_parallel(smiles, silent)
 
 
 def sanitize_smiles_parallel(smiles: Iterable[str]) -> List[str]:
@@ -232,6 +233,8 @@ def smiles_to_inchikey_parallel(smiles: Iterable[str]) -> List[str]:
 
 def msready_inchi_inchikey_parallel(
     smiles: Iterable[str],
+    *,
+    silent: bool = True,
 ) -> Tuple[List[str], List[str], List[str]]:
     """
     Parallel conversion to MS-Ready SMILES, InChI, and InChIKey simultaneously.
@@ -246,10 +249,11 @@ def msready_inchi_inchikey_parallel(
     
     # For small datasets, process directly
     if len(smiles) <= MIN_CHUNK_SIZE:
-        return _msready_inchi_inchikey_worker(smiles)
+        return _msready_inchi_inchikey_worker((smiles, silent))
     
     # Split into chunks
     chunks = _chunk_list(smiles, MIN_CHUNK_SIZE)
+    worker_args = [(chunk, silent) for chunk in chunks]
     
     # Use spawn context for cross-platform compatibility
     ctx = get_context('spawn')
@@ -259,7 +263,7 @@ def msready_inchi_inchikey_parallel(
     
     with ctx.Pool(processes=num_processes) as pool:
         # Use imap for memory efficiency with large datasets
-        results = list(pool.imap(_msready_inchi_inchikey_worker, chunks))
+        results = list(pool.imap(_msready_inchi_inchikey_worker, worker_args))
     
     # Unpack and flatten results
     msready_all = []

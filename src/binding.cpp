@@ -29,11 +29,11 @@ NB_MODULE(parallel_rdkit_backend, m) {
         .def_rw("includeChirality", &parallel_rdkit::FingerprintOptions::includeChirality)
         .def_rw("targetSize", &parallel_rdkit::FingerprintOptions::targetSize);
 
-    m.def("msready_smiles", &parallel_rdkit::msready_smiles, "smiles"_a,
+    m.def("msready_smiles", &parallel_rdkit::msready_smiles, "smiles"_a, "silent"_a = true,
           nb::call_guard<nb::gil_scoped_release>(),
           "Transforms a SMILES string into an MS-Ready SMILES string.");
 
-    m.def("msready_smiles_parallel", &parallel_rdkit::msready_smiles_parallel, "smiles"_a,
+    m.def("msready_smiles_parallel", &parallel_rdkit::msready_smiles_parallel, "smiles"_a, "silent"_a = true,
           nb::call_guard<nb::gil_scoped_release>(),
           "Parallel MS-Ready transformation of SMILES.");
 
@@ -53,7 +53,7 @@ NB_MODULE(parallel_rdkit_backend, m) {
           nb::call_guard<nb::gil_scoped_release>(),
           "Parallel SMILES to InChIKey conversion.");
 
-    m.def("msready_inchi_inchikey_parallel", &parallel_rdkit::msready_inchi_inchikey_parallel, "smiles"_a,
+    m.def("msready_inchi_inchikey_parallel", &parallel_rdkit::msready_inchi_inchikey_parallel, "smiles"_a, "silent"_a = true,
           nb::call_guard<nb::gil_scoped_release>(),
           "Parallel conversion to MS-Ready SMILES, InChI, and InChIKey simultaneously.");
 
