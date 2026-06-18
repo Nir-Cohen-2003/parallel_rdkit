@@ -281,6 +281,38 @@ std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::
     return {msready_vec, inchi_vec, inchikey_vec};
 }
 
+std::vector<int64_t> smiles_to_formula_parallel(const std::vector<std::string>& smiles) {
+    // Element order: H, C, N, O, F, Na, P, S, Cl, K, Br, I
+    constexpr int NUM_ELEMENTS = 12;
+    constexpr int ELEMENT_Z[NUM_ELEMENTS] = {1, 6, 7, 8, 9, 11, 15, 16, 17, 19, 35, 53};
+
+    long n = smiles.size();
+    std::vector<int64_t> results(static_cast<size_t>(n) * NUM_ELEMENTS, 0);
+
+    #pragma omp parallel for schedule(static, 500)
+    for (long i = 0; i < n; ++i) {
+        try {
+            std::unique_ptr<ROMol> mol(SmilesToMol(smiles[i]));
+            if (!mol) continue;
+            int64_t* row = &results[static_cast<size_t>(i) * NUM_ELEMENTS];
+            for (const auto& atom : mol->atoms()) {
+                int z = atom->getAtomicNum();
+                for (int j = 0; j < NUM_ELEMENTS; ++j) {
+                    if (z == ELEMENT_Z[j]) {
+                        row[j] += 1;
+                        break;
+                    }
+                }
+                row[0] += atom->getTotalNumHs();
+            }
+        } catch (...) {
+            // Invalid SMILES leave the row as zeros.
+        }
+    }
+
+    return results;
+}
+
 std::tuple<std::vector<float>, std::vector<uint8_t>> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts) {
     long n = smiles.size();
     size_t fpSize = opts.fpSize;

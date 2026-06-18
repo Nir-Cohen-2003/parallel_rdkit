@@ -61,6 +61,10 @@ NB_MODULE(parallel_rdkit_backend, m) {
           nb::call_guard<nb::gil_scoped_release>(),
           "Parallel fingerprint generation.");
 
+    m.def("smiles_to_formula_parallel", &parallel_rdkit::smiles_to_formula_parallel, "smiles"_a,
+          nb::call_guard<nb::gil_scoped_release>(),
+          "Parallel molecular formula computation. Returns a flattened (n*12) list of int64 counts in element order H, C, N, O, F, Na, P, S, Cl, K, Br, I.");
+
     // ScreenSmarts bindings
     nb::class_<parallel_rdkit::ScreenSmartsOptions>(m, "ScreenSmartsOptions")
         .def(nb::init<>())

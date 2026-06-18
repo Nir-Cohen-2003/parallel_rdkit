@@ -6,6 +6,9 @@ from .fingerprint import (
     FingerprintParams,
     get_fp_list,
 )
+from .mol import (
+    smiles_to_formula,
+)
 from .screen_smarts import (
     screen_smarts,
 )
@@ -50,9 +53,9 @@ __all__ = [
     "smiles_to_inchi_parallel",
     "smiles_to_inchikey_parallel",
     "msready_inchi_inchikey_parallel",
+    "smiles_to_formula",
     "FingerprintParams",
     "get_fp_list",
-    "get_fp_polars",
     "screen_smarts",
     "calculate_similarity_matrix",
     "calculate_similarity_matrix_streaming",

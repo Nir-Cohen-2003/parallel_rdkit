@@ -35,4 +35,9 @@ std::tuple<std::vector<std::string>, std::vector<std::string>, std::vector<std::
 
 std::tuple<std::vector<float>, std::vector<uint8_t>> get_fingerprints_parallel(const std::vector<std::string>& smiles, const FingerprintOptions& opts);
 
+// Return a flattened (n * 12) vector of int64_t counts for the formula array.
+// Element order: H, C, N, O, F, Na, P, S, Cl, K, Br, I.
+// Invalid SMILES produce a row of zeros.
+std::vector<int64_t> smiles_to_formula_parallel(const std::vector<std::string>& smiles);
+
 } // namespace parallel_rdkit

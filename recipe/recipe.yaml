@@ -18,8 +18,6 @@ source:
 
 build:
   number: 0
-  # python:
-  #   version_independent: true
 
 requirements:
   ignore_run_exports:
@@ -27,7 +25,7 @@ requirements:
       - python_abi
   build:
     - ${{ compiler('cxx') }}
-    - python >=3.8
+    - python ${{ python }}.*
     - pip
     - python-build
     - librdkit-dev
@@ -38,7 +36,7 @@ requirements:
     - cmake
     - ninja
   host:
-    - python >=3.8
+    - python ${{ python }}.*
     - pip
     - python-build
     - librdkit-dev
@@ -49,11 +47,12 @@ requirements:
     - cmake
     - ninja
   run:
-    - python >=3.8
-    # - rdkit
+    - python ${{ python }}.*
     - numpy
+    - polars
+    - pyarrow
     - selfies
-    - ${{ pin_compatible('rdkit', exact=True) }}
+    - ${{ pin_compatible('rdkit') }}
 
 tests:
   - python:

@@ -265,6 +265,51 @@ Args:
 Returns:
     List of sanitized SMILES strings.
 
+#### `smiles_to_formula(smiles: Union[Iterable[str], pl.Series]) -> Union[np.ndarray, pl.Series]`
+
+Compute molecular formulas for a list or polars Series of SMILES strings.
+
+The C++ backend parallelizes formula computation over molecules using OpenMP. The backend returns a flattened `(n*12)` array of int64 counts, which Python reshapes into a 2D numpy array of shape `(n, 12)`.
+
+Element counts are returned in the fixed order:
+`["H", "C", "N", "O", "F", "Na", "P", "S", "Cl", "K", "Br", "I"]`
+
+The return type depends on the input type:
+- If `smiles` is a `polars.Series`, the 2D numpy array is ingested directly into a `polars.Series` of dtype `Array(Int64, 12)` (no Python list of arrays is created).
+- Otherwise, a 2D `int64` numpy array of shape `(n, 12)` is returned.
+
+Invalid SMILES produce a row of zeros. Atoms whose elements are not in the 12-element list above are silently ignored.
+
+Args:
+    smiles: An iterable of SMILES strings, or a polars Series of SMILES.
+
+Returns:
+    `np.ndarray` of shape `(n, 12)` for list/iterable input, or a `pl.Series` of dtype `Array(Int64, 12)` for polars Series input.
+
+**Example (list input):**
+```python
+from parallel_rdkit import smiles_to_formula
+
+smiles_to_formula(["CCO", "CF"])
+# array([[6, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+#        [3, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]], dtype=int64)
+```
+
+**Example (polars input):**
+```python
+import polars as pl
+from parallel_rdkit import smiles_to_formula
+
+s = pl.Series(["CCO", "CF"])
+smiles_to_formula(s)
+# shape: (2,)
+# Series: 'formula' [array[i64, 12]]
+# [
+#     [6, 2, 0, 1, 0, 0, ... 0]
+#     [3, 1, 0, 0, 1, 0, ... 0]
+# ]
+```
+
 ### Module: `parallel_rdkit.stoned`
 
 **Dependencies Required:**
