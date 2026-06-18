@@ -36,10 +36,6 @@ requirements:
     - scikit-build-core
     - cmake
     - ninja
-    - if: linux
-      then:
-        - auditwheel
-        - patchelf
   host:
     - python ${{ python }}.*
     - pip
