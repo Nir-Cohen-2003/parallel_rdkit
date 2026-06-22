@@ -199,9 +199,20 @@ std::vector<std::vector<uint8_t>> screen_smarts_direct(
     
     // Parse SMARTS
     auto queries = parse_smarts(smarts_list);
-    
-    // Process all at once
-    auto result = process_batch(smiles_list, queries);
+
+    // Process in batches to bound peak memory (SubstructLibrary etc.)
+    constexpr size_t BATCH_SIZE = 64000;
+    std::vector<std::vector<uint8_t>> result;
+    result.reserve(smiles_list.size());
+
+    for (size_t start = 0; start < smiles_list.size(); start += BATCH_SIZE) {
+        size_t end = std::min(start + BATCH_SIZE, smiles_list.size());
+        std::vector<std::string> batch(smiles_list.begin() + start, smiles_list.begin() + end);
+        auto batch_result = process_batch(batch, queries);
+        result.insert(result.end(),
+                      std::make_move_iterator(batch_result.begin()),
+                      std::make_move_iterator(batch_result.end()));
+    }
     
     // Save cache if path provided
     if (!cache_path.empty()) {
