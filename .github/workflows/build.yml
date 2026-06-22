@@ -39,7 +39,7 @@ jobs:
 
             - name: Build packages
               run: |
-                  pixi build
+                  pixi publish
               shell: bash
 
             - name: Run tests

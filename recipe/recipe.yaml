@@ -30,7 +30,11 @@ requirements:
     by_name:
       - python_abi
   build:
-    - ${{ compiler('cxx') }}
+    - if: win
+      then:
+        - vs2022_win-64
+      else:
+        - ${{ compiler('cxx') }}
     - python ${{ python }}.*
     - pip
     - python-build
