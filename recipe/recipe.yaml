@@ -18,7 +18,12 @@ source:
 
 build:
   number: 0
-  script: build.sh
+  script:
+    - if: win
+      then:
+        - call build.bat
+      else:
+        - bash build.sh
 
 requirements:
   ignore_run_exports:
