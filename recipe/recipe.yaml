@@ -1,6 +1,6 @@
 context:
   name: "parallel_rdkit"
-  version: "0.6.0"
+  version: "0.6.1"
 
 package:
   name: "${{ name|lower }}"

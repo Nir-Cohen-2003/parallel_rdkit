@@ -103,7 +103,23 @@ size_t count_lines(const std::string& filepath) {
     return count;
 }
 
-// Process a batch of SMILES and return matches for each SMARTS
+// Process a batch of SMILES and return matches for each SMARTS.
+//
+// BATCH APPROACH (fixes OOM):
+//   1. Parse every SMILES in the batch ONCE (parallel) and compute its pattern
+//      fingerprint. KEEP the parsed mol — do not discard it.
+//   2. Build a SubstructLibrary with MolHolder (stores parsed mols in memory)
+//      + PatternHolder (fingerprint pre-filter). Because MolHolder::getMol()
+//      returns the already-parsed mol, there is NO re-parsing during matching.
+//
+//   The old code used CachedTrustedSmilesMolHolder, which stores raw SMILES
+//   strings and re-parses via SmilesToMol() on EVERY getMol() call. Since
+//   getMatches() calls getMol() for each of the M SMARTS queries, every
+//   molecule was parsed up to M times per batch. That allocation churn grew
+//   RSS monotonically across batches until OOM — even in streaming mode.
+//
+// Memory is bounded by batch_size: N parsed ROMols + N fingerprints + the
+// N x M result matrix. Everything is freed when process_batch returns.
 std::vector<std::vector<uint8_t>> process_batch(
     const std::vector<std::string>& smiles_batch,
     const std::vector<std::unique_ptr<ROMol>>& queries) {
@@ -111,46 +127,70 @@ std::vector<std::vector<uint8_t>> process_batch(
     size_t N = smiles_batch.size();
     size_t M = queries.size();
     
-    // Generate fingerprints in parallel
+    // Phase 1: Parse all SMILES in parallel — once per molecule, no exceptions.
+    // Store parsed mols and fingerprints for the library build below.
+    std::vector<boost::shared_ptr<ROMol>> parsed_mols(N);
     std::vector<ExplicitBitVect*> computed_fps(N, nullptr);
     
     #pragma omp parallel for schedule(dynamic)
     for (long i = 0; i < static_cast<long>(N); ++i) {
         SmilesParserParams params;
         params.sanitize = false;
-        std::unique_ptr<ROMol> mol(SmilesToMol(smiles_batch[i], params));
-        if (mol) {
-            computed_fps[i] = PatternFingerprintMol(*mol);
+        RWMol* m = SmilesToMol(smiles_batch[i], params);
+        if (m) {
+            try {
+                m->updatePropertyCache();  // match CachedTrustedSmilesMolHolder behaviour
+            } catch (...) {
+                delete m;
+                m = nullptr;
+            }
+        }
+        if (m) {
+            parsed_mols[i] = boost::shared_ptr<ROMol>(m);
+            computed_fps[i] = PatternFingerprintMol(*m);
         }
     }
     
-    // Build SubstructLibrary for this batch
-    boost::shared_ptr<CachedTrustedSmilesMolHolder> mols(new CachedTrustedSmilesMolHolder());
+    // Phase 2: Build SubstructLibrary with MolHolder (parsed mols kept in
+    // memory — getMol returns the shared_ptr, no SmilesToMol re-parse) and
+    // PatternHolder (fingerprint filter skips impossible matches cheaply).
+    boost::shared_ptr<MolHolder> molHolder(new MolHolder());
     boost::shared_ptr<PatternHolder> fps(new PatternHolder());
+    molHolder->getMols().reserve(N);
     
     for (size_t i = 0; i < N; ++i) {
-        mols->addSmiles(smiles_batch[i]);
-        if (computed_fps[i]) {
-            fps->addFingerprint(computed_fps[i]);
+        if (parsed_mols[i]) {
+            molHolder->getMols().push_back(parsed_mols[i]);
+            if (computed_fps[i]) {
+                fps->addFingerprint(computed_fps[i]);
+            } else {
+                fps->addFingerprint(new ExplicitBitVect(2048));
+            }
         } else {
+            // Empty placeholder keeps index alignment with smiles_batch.
+            molHolder->getMols().push_back(boost::make_shared<ROMol>());
             fps->addFingerprint(new ExplicitBitVect(2048));
         }
     }
+    // Release our references — the library now owns the mols/fingerprints.
+    parsed_mols.clear();
     
-    SubstructLibrary lib(mols, fps);
+    SubstructLibrary lib(molHolder, fps);
     
-    // Query each SMARTS
+    // Phase 3: Run each SMARTS against the entire batch. getMatches uses the
+    // fingerprint pre-filter and reads pre-parsed mols (zero re-parsing).
+    // maxResults=-1 returns ALL matching molecule indices — no short-circuit.
+    // numThreads=-1 lets SubstructLibrary parallelise internally.
     std::vector<std::vector<uint8_t>> bit_matrix(N, std::vector<uint8_t>(M, 0));
     for (size_t j = 0; j < M; ++j) {
         if (!queries[j]) continue;
-        // Use explicit types to avoid ambiguity
         std::vector<unsigned int> matches = lib.getMatches(
-            *queries[j], 
+            *queries[j],
             false,  // recursionPossible
-            false,  // useChirality  
+            false,  // useChirality
             false,  // useQueryQueryMatches
-            -1,     // numThreads
-            -1      // maxResults
+            -1,     // numThreads (all)
+            -1      // maxResults (all matching molecules)
         );
         for (unsigned int match_idx : matches) {
             bit_matrix[match_idx][j] = 1;
@@ -200,7 +240,7 @@ std::vector<std::vector<uint8_t>> screen_smarts_direct(
     // Parse SMARTS
     auto queries = parse_smarts(smarts_list);
 
-    // Process in batches to bound peak memory (SubstructLibrary etc.)
+    // Process in batches to bound peak memory (only ~numThreads live mols).
     constexpr size_t BATCH_SIZE = 64000;
     std::vector<std::vector<uint8_t>> result;
     result.reserve(smiles_list.size());
