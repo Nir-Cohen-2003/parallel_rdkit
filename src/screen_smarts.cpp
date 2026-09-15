@@ -32,6 +32,22 @@
 #include <boost/serialization/vector.hpp>
 #include <chrono>
 
+// malloc_trim — return freed arena memory to the OS between batches.
+// On Linux, glibc's ptmalloc2 keeps freed chunks in per-arena free lists
+// and rarely returns them to the OS. With OpenMP threads allocating/freeing
+// across many arenas, RSS grows monotonically (fragmentation, not a leak).
+// malloc_trim(0) walks every arena and releases all trimmable memory at the
+// top of each heap back to the kernel. Called after each batch, this bounds
+// RSS to the working set of a single batch instead of accumulating across
+// all batches. The call itself is fast (microseconds) and does not affect
+// OpenMP parallelism.
+#if defined(__linux__)
+#include <malloc.h>
+static inline void trim_arenas() { malloc_trim(0); }
+#else
+static inline void trim_arenas() {}
+#endif
+
 namespace parallel_rdkit {
 
 using namespace RDKit;
@@ -252,6 +268,9 @@ std::vector<std::vector<uint8_t>> screen_smarts_direct(
         result.insert(result.end(),
                       std::make_move_iterator(batch_result.begin()),
                       std::make_move_iterator(batch_result.end()));
+        // Return freed arena memory (mols, fingerprints, SubstructLibrary
+        // internals) to the OS so RSS doesn't accumulate across batches.
+        trim_arenas();
     }
     
     // Save cache if path provided
@@ -332,6 +351,8 @@ size_t screen_smarts_streaming(
             }
             total_processed += batch.size();
             batch.clear();
+            // Return freed arena memory to the OS so RSS doesn't accumulate.
+            trim_arenas();
         }
     }
     
