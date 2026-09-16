@@ -9,7 +9,6 @@ SMILES = ["CCO", "c1ccccc1", "CC(=O)O", "C", "N"]
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--backend", choices=("cpu", "gpu"), default="cpu")
     p.add_argument("--left-size", type=int, default=100)
     p.add_argument("--right-size", type=int, default=100)
     p.add_argument("--fp-size", type=int, default=2048)
@@ -26,7 +25,7 @@ def main():
     params = FingerprintParams(fpSize=a.fp_size)
     for _ in range(a.repeat):
         started = time.perf_counter()
-        result = cross_similarity(left, right, backend=a.backend, threshold=a.threshold,
+        result = cross_similarity(left, right, threshold=a.threshold,
                                   fp_params=params, output_path=a.output_path,
                                   overwrite=a.overwrite, batch_size=a.batch_size,
                                   tile_size=a.tile_size)

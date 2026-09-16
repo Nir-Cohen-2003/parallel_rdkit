@@ -121,7 +121,7 @@ def _snapshot_params(params):
 
 
 def cross_similarity(left_smiles: Iterable[str], right_smiles: Iterable[str], *,
-                     backend="cpu", threshold=None, fp_params=None,
+                     threshold=None, fp_params=None,
                      assume_sanitized=False, output_path=None, overwrite=False,
                      batch_size=4096, tile_size=256):
     """Compute rectangular binary Tanimoto similarity.
@@ -136,8 +136,6 @@ def cross_similarity(left_smiles: Iterable[str], right_smiles: Iterable[str], *,
     """
     left_smiles = _materialize(left_smiles, "left_smiles")
     right_smiles = _materialize(right_smiles, "right_smiles")
-    if backend not in {"cpu", "gpu"}:
-        raise ValueError("backend must be 'cpu' or 'gpu'")
     threshold = _threshold(threshold)
     if output_path is not None and threshold is not None:
         raise ValueError("threshold and output_path cannot be combined")
@@ -149,12 +147,6 @@ def cross_similarity(left_smiles: Iterable[str], right_smiles: Iterable[str], *,
         raise TypeError("overwrite must be boolean")
     overwrite = bool(overwrite)
     params = _snapshot_params(fp_params)
-    if backend == "gpu":
-        from ._similarity_gpu import cross_similarity_gpu
-        return cross_similarity_gpu(left_smiles, right_smiles, threshold=threshold,
-                                    fp_params=params, assume_sanitized=bool(assume_sanitized),
-                                    output_path=output_path, overwrite=overwrite,
-                                    batch_size=batch_size, tile_size=tile_size)
     if output_path is not None:
         try:
             from .parallel_rdkit_backend import cross_similarity_dense_to_file

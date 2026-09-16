@@ -115,142 +115,21 @@ Screen molecules from a SMILES file against a list of SMARTS patterns.
 - Direct mode: N x M boolean numpy array (N molecules, M SMARTS patterns)
 - Streaming mode: Number of molecules processed
 
-### Module: `parallel_rdkit.matrix_similarity`
+### Clustering helpers
 
-**Dependencies Required:**
-- `nvmolkit` - GPU-accelerated fingerprint generation and similarity calculation
-- `torch` - PyTorch tensors for GPU computation
-
-Install separately: `pip install nvmolkit torch`
-
-#### `calculate_similarity_matrix(smiles: List[str], parquet_path: Union[str, Path], indices: Optional[np.ndarray] = None, fp_params: Optional[FingerprintParams] = None, similarity_metric: Literal["tanimoto", "cosine", "both"] = "tanimoto", threshold: Optional[float] = None, memory_usage_fraction: float = 0.5, log_path: Optional[Union[str, Path]] = None) -> None`
-
-Calculate similarity matrix for a list of SMILES strings using GPU acceleration.
-
-Writes lower-triangular similarities to parquet file (memory efficient). Only parquet output mode is supported.
-
-**How the Calculation Works:**
-1. **Fingerprint Generation**: Uses nvmolkit's GPU-accelerated Morgan fingerprint generator
-2. **Similarity Computation**: Computes the matrix in row chunks based on available memory
-3. **Lower Triangular Storage**: Only stores pairs where `mol1_idx <= mol2_idx` to avoid redundancy
-4. **Threshold Filtering**: Applied on GPU before transferring to CPU (optional)
-5. **Chunked Writing**: Appends results incrementally to parquet file using PyArrow
-
-Args:
-    smiles: List of SMILES strings.
-    parquet_path: Path to output parquet file (required).
-    indices: Original molecule indices from the caller. If None, uses `range(len(smiles))`. Invalid SMILES are filtered out and their indices are removed from output.
-    fp_params: Fingerprint parameters as `FingerprintParams` dataclass. Defaults to Morgan fingerprints with radius=2, fpSize=2048.
-    similarity_metric: Type of similarity to compute - "tanimoto", "cosine", or "both".
-    threshold: Minimum similarity threshold. Only similarities >= threshold are stored.
-    memory_usage_fraction: Fraction of available CPU memory to use for chunks (0.0-1.0, default 0.5).
-    log_path: Path to log progress. If None, uses `{parquet_path}.log`.
-    
-Returns:
-    None (results written to `parquet_path`).
-
-**Parquet Output Format:**
-Three columns when metric is "tanimoto" or "cosine":
-- `mol1_idx` (uint32), `mol2_idx` (uint32), `tanimoto` or `cosine` (float32)
-
-Five columns when metric is "both":
-- `mol1_idx` (uint32), `mol2_idx` (uint32), `tanimoto` (float32), `cosine` (float32)
-
-- Only lower triangular pairs stored (mol1_idx <= mol2_idx)
-- Snappy compression enabled
-- Dictionary encoding for index columns
-
-**Example:**
-```python
-from parallel_rdkit.matrix_similarity import calculate_similarity_matrix
-from parallel_rdkit.fingerprint import FingerprintParams
-import numpy as np
-
-smiles = ["CCO", "CCCO", "CCCCO"]
-indices = np.array([100, 200, 300], dtype=np.uint32)
-
-# Calculate Tanimoto similarities with threshold filtering
-calculate_similarity_matrix(
-    smiles=smiles,
-    parquet_path="/path/to/output.parquet",
-    indices=indices,
-    fp_params=FingerprintParams(fp_type="morgan", radius=2, fpSize=2048),
-    similarity_metric="tanimoto",
-    threshold=0.5,  # Only store similarities >= 0.5
-    memory_usage_fraction=0.5
-)
-# Creates: output.parquet and output.parquet.log
-
-# Calculate both Tanimoto and Cosine similarities
-calculate_similarity_matrix(
-    smiles=smiles,
-    parquet_path="/path/to/output_both.parquet",
-    indices=indices,
-    similarity_metric="both",
-    threshold=0.5
-)
-# Creates parquet with both tanimoto and cosine columns
-```
-
-#### `calculate_tanimoto_matrix(smiles: List[str], parquet_path: Union[str, Path], indices: Optional[np.ndarray] = None, fp_params: Optional[FingerprintParams] = None, threshold: Optional[float] = None, memory_usage_fraction: float = 0.5, log_path: Optional[Union[str, Path]] = None) -> None`
-
-Backward compatibility alias for `calculate_similarity_matrix()` with `similarity_metric="tanimoto"`.
-
-#### `calculate_cosine_matrix(smiles: List[str], parquet_path: Union[str, Path], indices: Optional[np.ndarray] = None, fp_params: Optional[FingerprintParams] = None, threshold: Optional[float] = None, memory_usage_fraction: float = 0.5, log_path: Optional[Union[str, Path]] = None) -> None`
-
-Alias for `calculate_similarity_matrix()` with `similarity_metric="cosine"`.
-
-#### `calculate_similarity_matrix_streaming(parquet_path: Union[str, Path], output_parquet_path: Union[str, Path], smiles_column: str = "smiles", index_column: str = "index", fp_params: Optional[FingerprintParams] = None, similarity_metric: Literal["tanimoto", "cosine", "both"] = "tanimoto", threshold: Optional[float] = None, memory_usage_fraction: float = 0.5, log_path: Optional[Union[str, Path]] = None) -> None`
-
-Calculate similarity matrix by reading SMILES from a parquet file using polars.
-
-Reads SMILES and their corresponding indices from an input parquet file, then computes similarities using `calculate_similarity_matrix()`.
-
-Args:
-    parquet_path: Path to input parquet file containing SMILES and indices.
-    output_parquet_path: Path for output parquet file (required).
-    smiles_column: Name of column containing SMILES strings (default: "smiles").
-    index_column: Name of column containing molecule indices (default: "index").
-    fp_params: Fingerprint parameters as `FingerprintParams` dataclass.
-    similarity_metric: "tanimoto", "cosine", or "both".
-    threshold: Minimum similarity threshold.
-    memory_usage_fraction: Fraction of available CPU memory to use.
-    log_path: Path to log file. Auto-generated from output_parquet_path if not provided.
-    
-Returns:
-    None (results written to `output_parquet_path`).
-
-#### `calculate_tanimoto_matrix_streaming(parquet_path: Union[str, Path], output_parquet_path: Union[str, Path], smiles_column: str = "smiles", index_column: str = "index", fp_params: Optional[FingerprintParams] = None, threshold: Optional[float] = None, memory_usage_fraction: float = 0.5, log_path: Optional[Union[str, Path]] = None) -> None`
-
-Backward compatibility alias for streaming calculation with `similarity_metric="tanimoto"`.
-
-#### `calculate_cosine_matrix_streaming(parquet_path: Union[str, Path], output_parquet_path: Union[str, Path], smiles_column: str = "smiles", index_column: str = "index", fp_params: Optional[FingerprintParams] = None, threshold: Optional[float] = None, memory_usage_fraction: float = 0.5, log_path: Optional[Union[str, Path]] = None) -> None`
-
-Streaming calculation with `similarity_metric="cosine"`.
+Similarity matrices can be partitioned with the generic clustering helpers
+exported from the package root or `parallel_rdkit.clustering`. The historical
+`parallel_rdkit.matrix_similarity` import path remains available for these two
+helpers.
 
 #### `butina_split(sim_matrix: np.ndarray, dist_threshold: float = 0.3) -> List[int]`
 
-Perform Butina clustering on the similarity matrix.
+Perform Butina clustering using a distance cutoff of `dist_threshold`.
 
-Args:
-    sim_matrix: Dense similarity matrix (N x N).
-    dist_threshold: Distance threshold (1 - similarity) for clustering.
-    
-Returns:
-    List of cluster IDs for each molecule in the matrix.
+#### `umap_split(sim_matrix: np.ndarray, n_clusters: int = 10, random_state: int = 42, **umap_kwargs) -> List[int]`
 
-#### `umap_split(sim_matrix: np.ndarray, n_clusters: int = 10, random_state: int = 42) -> List[int]`
-
-Perform UMAP reduction followed by KMeans clustering for splitting.
-
-Args:
-    sim_matrix: Similarity matrix.
-    n_clusters: Number of clusters for KMeans.
-    random_state: Seed for reproducibility.
-    **umap_kwargs: Additional arguments for UMAP (e.g., n_neighbors, min_dist).
-    
-Returns:
-    List of cluster labels.
+Reduce a similarity matrix with UMAP and cluster the embedding with KMeans.
+UMAP and scikit-learn are optional dependencies required only by this helper.
 
 ### Module: `parallel_rdkit.mol`
 
@@ -405,47 +284,12 @@ Returns:
 
 ## Benchmarking
 
-### Large-Scale Similarity Matrix Calculation
-
-For benchmarking similarity matrix calculation on large datasets:
-
-**What is skipped during processing:**
-- Invalid SMILES strings (parsing errors)
-- Molecules that fail fingerprint generation
-- These are automatically filtered out and their indices are excluded from the output
-
-**Recommended benchmark workflow:**
-```python
-from parallel_rdkit.matrix_similarity import calculate_similarity_matrix
-from parallel_rdkit.fingerprint import FingerprintParams
-import numpy as np
-
-# Large dataset (e.g., 100K+ molecules)
-smiles = [...]  # Your SMILES list
-indices = np.arange(len(smiles), dtype=np.uint32)
-
-# Memory-efficient calculation with automatic chunking
-calculate_similarity_matrix(
-    smiles=smiles,
-    parquet_path="/path/to/large_output.parquet",
-    indices=indices,
-    fp_params=FingerprintParams(fp_type="morgan", radius=2, fpSize=2048),
-    similarity_metric="both",  # Calculate both Tanimoto and Cosine
-    threshold=0.5,  # Skip low-similarity pairs
-    memory_usage_fraction=0.3  # Use 30% of available memory for chunks
-)
-```
-
-**Performance notes:**
-- Chunk size is automatically calculated based on available memory
-- Only valid molecules are processed; invalid SMILES are logged and skipped
-- GPU memory is managed automatically by nvmolkit
-- For datasets > 1M molecules, use `memory_usage_fraction=0.1-0.3` to avoid OOM
-
+The reproducible rectangular similarity benchmark is available at
+`benchmarks/benchmark_cross_similarity.py`.
 
 ## Rectangular cross similarity
 
-Use `cross_similarity(left_smiles, right_smiles, *, backend="cpu", threshold=None,
+Use `cross_similarity(left_smiles, right_smiles, *, threshold=None,
 fp_params=None, assume_sanitized=False, output_path=None, overwrite=False,
 batch_size=4096, tile_size=256)` for a rectangular binary Tanimoto operation.
 The result has `shape`, `left_valid`, and `right_valid` plus exactly one payload:
@@ -456,10 +300,9 @@ score is formed as float32, and valid zero/zero vectors score 0.0.
 **Invalid input positions remain present; every dense pair involving one is
 NaN.** Use the validity masks and NaN-aware reductions. COO excludes invalid
 pairs but preserves original indices and row-major ordering. `batch_size` and
-`tile_size` independently bound molecule and score tiles. CPU supports Morgan,
-RDKit, AtomPair, TopologicalTorsion, and canonical 167-bit MACCS binary
-fingerprints; count-vector methods are rejected. GPU mode is strict Morgan-only
-with supported sizes and requires optional pinned nvMolKit/CUDA dependencies;
-it never silently falls back to CPU. `assume_sanitized=True` is a caller
-assertion and does not disable RDKit molecule construction. File output uses an
-atomic transaction and requires `overwrite=True` to replace an existing path.
+`tile_size` independently bound molecule and score tiles. The native
+implementation supports Morgan, RDKit, AtomPair, TopologicalTorsion, and
+canonical 167-bit MACCS binary fingerprints; count-vector methods are rejected.
+`assume_sanitized=True` is a caller assertion and does not disable RDKit
+molecule construction. File output uses an atomic transaction and requires
+`overwrite=True` to replace an existing path.
