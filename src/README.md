@@ -304,3 +304,22 @@ calculate_similarity_matrix(
 - GPU memory is managed automatically by nvmolkit
 - For datasets > 1M molecules, use `memory_usage_fraction=0.1-0.3` to avoid OOM
 
+
+## Rectangular cross similarity
+
+`cross_similarity(left_smiles, right_smiles, *, backend="cpu", threshold=None,
+fp_params=None, assume_sanitized=False, output_path=None, overwrite=False,
+batch_size=4096, tile_size=256)` computes binary Tanimoto scores for an N by M
+rectangle. With no threshold it returns `SimilarityResult.dense` (C-order
+float32); with a threshold it returns `(rows, columns, values)` COO arrays in
+sorted row-major order; `output_path` returns a completed `.npy` path. Thresholds
+are inclusive and are compared after float32 score formation. A valid zero/zero
+pair is 0.0.
+
+Invalid input positions remain present: every dense pair involving an invalid
+left or right position is NaN, while COO omits such pairs. Use the two validity
+masks and NaN-aware reductions. `batch_size` controls molecule batches and
+`tile_size` controls score tiles independently. GPU mode is strict Morgan-only
+and requires the optional pinned nvMolKit/CUDA dependencies; it never falls
+back to CPU. `assume_sanitized=True` is a caller assertion, not a request to
+bypass RDKit molecule construction.

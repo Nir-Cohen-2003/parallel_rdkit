@@ -1,13 +1,54 @@
 #include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/tuple.h>
 #include "mol.hpp"
+#include "similarity.hpp"
+#include "similarity_io.hpp"
 #include "screen_smarts.hpp"
 #include "stoned.hpp"
 
 namespace nb = nanobind;
 using namespace nb::literals;
+
+namespace {
+using DenseArray = nb::ndarray<nb::numpy, float, nb::c_contig>;
+using MaskArray = nb::ndarray<nb::numpy, bool, nb::c_contig>;
+using I64Array = nb::ndarray<nb::numpy, std::int64_t, nb::c_contig>;
+using FloatArray = nb::ndarray<nb::numpy, float, nb::c_contig>;
+void check_matrix(const DenseArray &a, std::size_t n, std::size_t m) {
+    if (a.ndim() != 2 || a.shape(0) != n || a.shape(1) != m || !a.data()) throw std::invalid_argument("dense output must be C-contiguous float32 with requested shape");
+}
+void check_mask(const MaskArray &a, std::size_t n) {
+    if (a.ndim() != 1 || a.shape(0) != n || !a.data()) throw std::invalid_argument("mask output must be one-dimensional bool");
+}
+void native_dense_into(const std::vector<std::string>& left, const std::vector<std::string>& right,
+ const parallel_rdkit::FingerprintOptions& opts, bool assume_sanitized, std::size_t batch_size,
+ std::size_t tile_size, DenseArray out, MaskArray left_valid, MaskArray right_valid) {
+    check_matrix(out,left.size(),right.size()); check_mask(left_valid,left.size()); check_mask(right_valid,right.size());
+    parallel_rdkit::compute_similarity_dense_into(left,right,opts,assume_sanitized,batch_size,tile_size,
+      out.data(), reinterpret_cast<std::uint8_t *>(left_valid.data()), reinterpret_cast<std::uint8_t *>(right_valid.data()));
+}
+std::vector<std::int64_t> native_coo_count_into(const std::vector<std::string>& left, const std::vector<std::string>& right,
+ const parallel_rdkit::FingerprintOptions& opts, bool assume_sanitized, double threshold, std::size_t batch_size,
+ std::size_t tile_size, MaskArray left_valid, MaskArray right_valid) {
+    check_mask(left_valid,left.size()); check_mask(right_valid,right.size());
+    return parallel_rdkit::count_similarity_coo(left,right,opts,assume_sanitized,threshold,batch_size,tile_size,
+      reinterpret_cast<std::uint8_t *>(left_valid.data()), reinterpret_cast<std::uint8_t *>(right_valid.data()));
+}
+void native_coo_fill_into(const std::vector<std::string>& left, const std::vector<std::string>& right,
+ const parallel_rdkit::FingerprintOptions& opts, bool assume_sanitized, double threshold, std::size_t batch_size,
+ std::size_t tile_size, I64Array rows, I64Array cols, FloatArray values) {
+    if (rows.ndim()!=1 || cols.ndim()!=1 || values.ndim()!=1 ||
+        rows.shape(0)!=cols.shape(0) || rows.shape(0)!=values.shape(0) ||
+        (rows.shape(0) && (!rows.data() || !cols.data() || !values.data())))
+        throw std::invalid_argument("COO buffers must be equal-length one-dimensional arrays");
+    parallel_rdkit::fill_similarity_coo(left, right, opts, assume_sanitized,
+        threshold, batch_size, tile_size, rows.shape(0), rows.data(), cols.data(),
+        values.data());
+}
+}
 
 NB_MODULE(parallel_rdkit_backend, m) {
     m.doc() = "Parallel RDKit molecule processing backend";
@@ -60,6 +101,28 @@ NB_MODULE(parallel_rdkit_backend, m) {
     m.def("get_fingerprints_parallel", &parallel_rdkit::get_fingerprints_parallel, "smiles"_a, "opts"_a,
           nb::call_guard<nb::gil_scoped_release>(),
           "Parallel fingerprint generation.");
+
+    m.def("cross_similarity_dense_into", &native_dense_into,
+          "left"_a, "right"_a, "opts"_a, "assume_sanitized"_a = false,
+          "batch_size"_a = 4096, "tile_size"_a = 256, "out"_a,
+          "left_valid"_a, "right_valid"_a,
+          nb::call_guard<nb::gil_scoped_release>());
+    m.def("cross_similarity_dense_to_file", &parallel_rdkit::write_similarity_dense_npy,
+          "left"_a, "right"_a, "opts"_a, "assume_sanitized"_a = false,
+          "batch_size"_a = 4096, "tile_size"_a = 256, "output_path"_a,
+          "overwrite"_a = false,
+          nb::call_guard<nb::gil_scoped_release>(),
+          "Compute dense similarity in native batches and atomically publish a NumPy file.");
+    m.def("cross_similarity_coo_count_into", &native_coo_count_into,
+          "left"_a, "right"_a, "opts"_a, "assume_sanitized"_a = false,
+          "threshold"_a, "batch_size"_a = 4096, "tile_size"_a = 256,
+          "left_valid"_a, "right_valid"_a,
+          nb::call_guard<nb::gil_scoped_release>());
+    m.def("cross_similarity_coo_fill_into", &native_coo_fill_into,
+          "left"_a, "right"_a, "opts"_a, "assume_sanitized"_a = false,
+          "threshold"_a, "batch_size"_a = 4096, "tile_size"_a = 256,
+          "rows"_a, "columns"_a, "values"_a,
+          nb::call_guard<nb::gil_scoped_release>());
 
     m.def("smiles_to_formula_parallel", &parallel_rdkit::smiles_to_formula_parallel, "smiles"_a,
           nb::call_guard<nb::gil_scoped_release>(),

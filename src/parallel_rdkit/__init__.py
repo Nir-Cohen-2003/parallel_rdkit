@@ -12,6 +12,10 @@ from .mol import (
 from .screen_smarts import (
     screen_smarts,
 )
+from .similarity import (
+    cross_similarity,
+    SimilarityResult,
+)
 
 # Import STONED generation functions (requires selfies)
 try:
@@ -57,6 +61,8 @@ __all__ = [
     "FingerprintParams",
     "get_fp_list",
     "screen_smarts",
+    "cross_similarity",
+    "SimilarityResult",
     "calculate_similarity_matrix",
     "calculate_similarity_matrix_streaming",
     "calculate_tanimoto_matrix",

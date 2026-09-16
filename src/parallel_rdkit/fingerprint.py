@@ -56,6 +56,7 @@ class FingerprintParams:
         self.targetSize = targetSize
 
     def to_backend_opts(self) -> FingerprintOptions:
+        _validate_fingerprint_params(self, allow_count_methods=True)
         opts = FingerprintOptions()
         opts.fp_type = self.fp_type
         opts.fp_method = self.fp_method
@@ -72,6 +73,44 @@ class FingerprintParams:
         opts.includeChirality = self.includeChirality
         opts.targetSize = self.targetSize
         return opts
+
+
+def _validate_fingerprint_params(params: FingerprintParams, *, allow_count_methods=False) -> None:
+    if not isinstance(params.fp_type, str) or params.fp_type not in {
+            "morgan", "rdkit", "atompair", "torsion", "maccs"}:
+        raise ValueError("unsupported fingerprint family")
+    allowed_methods = {"GetFingerprint", "GetSparseFingerprint"}
+    if allow_count_methods:
+        allowed_methods.update({"GetCountFingerprint", "GetSparseCountFingerprint"})
+    if not isinstance(params.fp_method, str) or params.fp_method not in allowed_methods:
+        raise ValueError("unsupported fingerprint method")
+
+    int_max = np.iinfo(np.int32).max
+    def integer(value, name, minimum):
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+            raise TypeError(f"{name} must be an integer")
+        value = int(value)
+        if value < minimum or value > int_max:
+            raise ValueError(f"{name} must be in [{minimum}, {int_max}]")
+
+    def boolean(value, name):
+        if not isinstance(value, (bool, np.bool_)):
+            raise TypeError(f"{name} must be boolean")
+
+    integer(params.fpSize, "fpSize", 1)
+    integer(params.radius, "radius", 0)
+    integer(params.minPath, "minPath", 1)
+    integer(params.maxPath, "maxPath", 1)
+    integer(params.numBitsPerFeature, "numBitsPerFeature", 1)
+    integer(params.minDistance, "minDistance", 1)
+    integer(params.maxDistance, "maxDistance", 1)
+    integer(params.targetSize, "targetSize", 1)
+    if int(params.minPath) > int(params.maxPath):
+        raise ValueError("minPath must not exceed maxPath")
+    if int(params.minDistance) > int(params.maxDistance):
+        raise ValueError("minDistance must not exceed maxDistance")
+    for name in ("useBondTypes", "use2D", "countSimulation", "includeChirality"):
+        boolean(getattr(params, name), name)
 
 
 def get_fp_list(smiles: Iterable[str], params: FingerprintParams, return_numpy: bool = True) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], List[bool]]]:
